@@ -68,12 +68,25 @@ void CACHE_REPLACEMENT_STATE::InitReplacementState()
         }
     }
 
-    //SLRU
+    //MRU 
     // Contestants:  ADD INITIALIZATION FOR YOUR HARDWARE HERE
-    //myRepl = new LINE_REPLACEMENT_STATE* [ numsets ];
+    mruRepl = new LINE_REPLACEMENT_STATE* [ numsets ];
     
     // ensure that we were able to create replacement state
-    assert(myRepl);
+    assert(mruRepl);
+    
+    // Create the state for the sets
+    for(UINT32 setIndex=0; setIndex<numsets; setIndex++) 
+    {
+        mruRepl[ setIndex ]  = new LINE_REPLACEMENT_STATE[ assoc ];
+
+        for(UINT32 lineIndx=0; lineIndx<assoc; lineIndx++) 
+        {
+            // initialize stack position (for MRU)
+            // 0 being MRU, ASSOC-1 being LRU
+            mruRepl[ setIndex ][ lineIndx ].MRUstackposition = lineIndx;
+        }
+    }
 }
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -106,6 +119,7 @@ INT32 CACHE_REPLACEMENT_STATE::GetVictimInSet( UINT32 tid, UINT32 setIndex, cons
     else if( replPolicy == CRC_REPL_CONTESTANT )
     {
         // Contestants:  ADD YOUR VICTIM SELECTION FUNCTION HERE
+        return Get_MRU_Victim( setIndex );
     }
 
     // We should never get here
@@ -142,6 +156,7 @@ void CACHE_REPLACEMENT_STATE::UpdateReplacementState(
         // Contestants:  ADD YOUR UPDATE REPLACEMENT STATE FUNCTION HERE
         // Feel free to use any of the input parameters to make
         // updates to your replacement policy
+        UpdateMRU( setIndex, updateWayID );
     }
     
     
@@ -196,6 +211,35 @@ INT32 CACHE_REPLACEMENT_STATE::Get_Random_Victim( UINT32 setIndex )
 
 ////////////////////////////////////////////////////////////////////////////////
 //                                                                            //
+// This function finds the MRU victim in the cache set by returning the       //
+// cache block at the top  of the LRU stack. Top of LRU stack is '0'          //
+// while bottom of LRU stack is 'assoc-1'                                     //
+//                                                                            //
+////////////////////////////////////////////////////////////////////////////////
+INT32 CACHE_REPLACEMENT_STATE::Get_MRU_Victim( UINT32 setIndex )
+{
+    // Get pointer to replacement state of current set
+    LINE_REPLACEMENT_STATE *replSet = mruRepl[ setIndex ];
+
+    INT32   mruLine = 0;
+
+    // Search for victim whose stack position is assoc-1
+    for(UINT32 lineIndx=0; lineIndx<assoc; lineIndx++) 
+    {
+
+        //if everything in the set is used, use MRU line
+        if( replSet[lineIndx].MRUstackposition == 0 ) 
+        {
+            mruLine = lineIndx;
+            break;
+        }
+    }
+
+    // return mru line
+    return mruLine;
+}
+////////////////////////////////////////////////////////////////////////////////
+//                                                                            //
 // This function implements the LRU update routine for the traditional        //
 // LRU replacement policy. The arguments to the function are the physical     //
 // way and set index.                                                         //
@@ -222,6 +266,32 @@ void CACHE_REPLACEMENT_STATE::UpdateLRU( UINT32 setIndex, INT32 updateWayID )
 
 ////////////////////////////////////////////////////////////////////////////////
 //                                                                            //
+// This function implements the mru update routine for the traditional        //
+// mru replacement policy. The arguments to the function are the physical     //
+// way and set index.                                                         //
+//                                                                            //
+////////////////////////////////////////////////////////////////////////////////
+void CACHE_REPLACEMENT_STATE::UpdateMRU( UINT32 setIndex, INT32 updateWayID )
+{
+    // Determine current MRU stack position
+    UINT32 currMRUstackposition = mruRepl[ setIndex ][ updateWayID ].MRUstackposition;
+
+    // Update the stack position of all lines before the current line
+    // Update implies incremeting their stack positions by one
+    for(UINT32 lineIndx=0; lineIndx<assoc; lineIndx++) 
+    {
+        if( mruRepl[setIndex][lineIndx].MRUstackposition < currMRUstackposition ) 
+        {
+            mruRepl[setIndex][lineIndx].MRUstackposition++;
+        }
+    }
+
+    // Set the MRU stack position of new line to be zero
+    mruRepl[ setIndex ][ updateWayID ].MRUstackposition = 0;
+}
+
+////////////////////////////////////////////////////////////////////////////////
+//                                                                            //
 // The function prints the statistics for the cache                           //
 //                                                                            //
 ////////////////////////////////////////////////////////////////////////////////
@@ -233,7 +303,13 @@ ostream & CACHE_REPLACEMENT_STATE::PrintStats(ostream &out)
     out<<"=========================================================="<<endl;
 
     // CONTESTANTS:  Insert your statistics printing here
-
+    if(replPolicy == CRC_REPL_LRU){
+        out<<"LRU"<<endl;
+    }else if(replPolicy == CRC_REPL_RANDOM){
+        out<<"RANDOM"<<endl;
+    }else{
+        out<<"MRU"<<endl;
+    }
     return out;
     
 }
