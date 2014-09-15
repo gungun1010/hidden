@@ -32,7 +32,7 @@ typedef enum
 // Replacement State Per Cache Line
 typedef struct
 {
-    UINT32  LRUstackposition;
+    UINT32  LRUage;
 
     // CONTESTANTS: Add extra state per cache line here
     UINT32  FIFOstackposition;
