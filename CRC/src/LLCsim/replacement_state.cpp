@@ -160,7 +160,7 @@ void CACHE_REPLACEMENT_STATE::UpdateReplacementState(
         // Contestants:  ADD YOUR UPDATE REPLACEMENT STATE FUNCTION HERE
         // Feel free to use any of the input parameters to make
         // updates to your replacement policy
-        UpdateMRU( setIndex, updateWayID, cacheHit );
+        UpdateSWITCH( setIndex, updateWayID, cacheHit );
     }
     
     
@@ -283,7 +283,7 @@ void CACHE_REPLACEMENT_STATE::UpdateLRU( UINT32 setIndex, INT32 updateWayID )
 // way and set index.                                                         //
 //                                                                            //
 ////////////////////////////////////////////////////////////////////////////////
-void CACHE_REPLACEMENT_STATE::UpdateMRU( UINT32 setIndex, INT32 updateWayID, bool cacheHit )
+void CACHE_REPLACEMENT_STATE::UpdateSWITCH( UINT32 setIndex, INT32 updateWayID, bool cacheHit )
 {
     // Determine current MRU stack position
     UINT32 currcacheLineAge = myRepl[ setIndex ][ updateWayID ].cacheLineAge;
