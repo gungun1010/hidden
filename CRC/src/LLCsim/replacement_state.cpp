@@ -1,5 +1,5 @@
 #include "replacement_state.h"
-#include <vector>
+
 ////////////////////////////////////////////////////////////////////////////////
 ////////////////////////////////////////////////////////////////////////////////
 //                                                                            //
@@ -64,30 +64,29 @@ void CACHE_REPLACEMENT_STATE::InitReplacementState()
         for(UINT32 line=0; line<assoc; line++) 
         {
             // initialize stack position (for true LRU)
-            repl[ setIndex ][ line ].LRUage = line;
+            repl[ setIndex ][ line ].LRUstackposition = line;
         }
     }
 
-    //FIFO 
+    //MRU 
     // Contestants:  ADD INITIALIZATION FOR YOUR HARDWARE HERE
-    myRepl = new LINE_REPLACEMENT_STATE* [ numsets ];
+    mruRepl = new LINE_REPLACEMENT_STATE* [ numsets ];
     
     // ensure that we were able to create replacement state
-    assert(myRepl);
+    assert(mruRepl);
     
     // Create the state for the sets
     for(UINT32 setIndex=0; setIndex<numsets; setIndex++) 
     {
-        myRepl[ setIndex ]  = new LINE_REPLACEMENT_STATE[ assoc ];
+        mruRepl[ setIndex ]  = new LINE_REPLACEMENT_STATE[ assoc ];
 
         for(UINT32 lineIndx=0; lineIndx<assoc; lineIndx++) 
         {
-            // initialize stack position (for FIFO)
-            // 0 being first in, assoc -1 being last in
-            myRepl[ setIndex ][ lineIndx ].FIFOstackposition = lineIndx;
+            // initialize stack position (for MRU)
+            // 0 being MRU, ASSOC-1 being LRU
+            mruRepl[ setIndex ][ lineIndx ].MRUstackposition = lineIndx;
         }
     }
-
 }
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -106,7 +105,7 @@ void CACHE_REPLACEMENT_STATE::InitReplacementState()
 //                                                                            //
 ////////////////////////////////////////////////////////////////////////////////
 INT32 CACHE_REPLACEMENT_STATE::GetVictimInSet( UINT32 tid, UINT32 setIndex, const LINE_STATE *vicSet, UINT32 assoc,
-                                               Addr_t PC, Addr_t paddr, UINT32 accessType ) //Addr_t unsigned long long
+                                               Addr_t PC, Addr_t paddr, UINT32 accessType )
 {
     // If no invalid lines, then replace based on replacement policy
     if( replPolicy == CRC_REPL_LRU ) 
@@ -120,7 +119,7 @@ INT32 CACHE_REPLACEMENT_STATE::GetVictimInSet( UINT32 tid, UINT32 setIndex, cons
     else if( replPolicy == CRC_REPL_CONTESTANT )
     {
         // Contestants:  ADD YOUR VICTIM SELECTION FUNCTION HERE
-        return Get_FIFO_Victim( setIndex );
+        return Get_MRU_Victim( setIndex );
     }
 
     // We should never get here
@@ -157,8 +156,10 @@ void CACHE_REPLACEMENT_STATE::UpdateReplacementState(
         // Contestants:  ADD YOUR UPDATE REPLACEMENT STATE FUNCTION HERE
         // Feel free to use any of the input parameters to make
         // updates to your replacement policy
-        UpdateFIFO( setIndex, updateWayID, currLine, cacheHit, PC, accessType );
+        UpdateMRU( setIndex, updateWayID );
     }
+    
+    
 }
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -185,7 +186,7 @@ INT32 CACHE_REPLACEMENT_STATE::Get_LRU_Victim( UINT32 setIndex )
     // Search for victim whose stack position is assoc-1
     for(UINT32 way=0; way<assoc; way++) 
     {
-        if( replSet[way].LRUage == (assoc-1) ) 
+        if( replSet[way].LRUstackposition == (assoc-1) ) 
         {
             lruWay = way;
             break;
@@ -210,34 +211,32 @@ INT32 CACHE_REPLACEMENT_STATE::Get_Random_Victim( UINT32 setIndex )
 
 ////////////////////////////////////////////////////////////////////////////////
 //                                                                            //
-// This function finds the FIFO victim in the cache set by returning the       //
+// This function finds the MRU victim in the cache set by returning the       //
 // cache block at the top  of the LRU stack. Top of LRU stack is '0'          //
 // while bottom of LRU stack is 'assoc-1'                                     //
-// vicSet is the current set. You can access the contents of the set by       //
-// indexing using the wayID which ranges from 0 to assoc-1 e.g. vicSet[0]     //
-// is the first way and vicSet[4] is the 4th physical way of the cache.       //
-// Elements of LINE_STATE are defined in crc_cache_defs.h                     //
 //                                                                            //
 ////////////////////////////////////////////////////////////////////////////////
-INT32 CACHE_REPLACEMENT_STATE::Get_FIFO_Victim ( UINT32 setIndex)
+INT32 CACHE_REPLACEMENT_STATE::Get_MRU_Victim( UINT32 setIndex )
 {
     // Get pointer to replacement state of current set
-    LINE_REPLACEMENT_STATE *replSet = myRepl[ setIndex ];
+    LINE_REPLACEMENT_STATE *replSet = mruRepl[ setIndex ];
 
-    INT32   fifoWay   = 0;
+    INT32   mruLine = 0;
 
-    // Search for victim whose fifo stack position is 0
-    for(UINT32 way=0; way<assoc; way++) 
+    // Search for victim whose stack position is assoc-1
+    for(UINT32 lineIndx=0; lineIndx<assoc; lineIndx++) 
     {
-        if( replSet[way].FIFOstackposition == 0 ) 
+
+        //if everything in the set is used, use MRU line
+        if( replSet[lineIndx].MRUstackposition == 0 ) 
         {
-            fifoWay = way;
+            mruLine = lineIndx;
             break;
         }
     }
 
-    // return fifo way
-    return fifoWay;
+    // return mru line
+    return mruLine;
 }
 ////////////////////////////////////////////////////////////////////////////////
 //                                                                            //
@@ -249,40 +248,46 @@ INT32 CACHE_REPLACEMENT_STATE::Get_FIFO_Victim ( UINT32 setIndex)
 void CACHE_REPLACEMENT_STATE::UpdateLRU( UINT32 setIndex, INT32 updateWayID )
 {
     // Determine current LRU stack position
-    UINT32 currLRUage = repl[ setIndex ][ updateWayID ].LRUage;
+    UINT32 currLRUstackposition = repl[ setIndex ][ updateWayID ].LRUstackposition;
+
     // Update the stack position of all lines before the current line
     // Update implies incremeting their stack positions by one
     for(UINT32 way=0; way<assoc; way++) 
     {
-        if( repl[setIndex][way].LRUage < currLRUage ) 
+        if( repl[setIndex][way].LRUstackposition < currLRUstackposition ) 
         {
-            repl[setIndex][way].LRUage++;
+            repl[setIndex][way].LRUstackposition++;
         }
     }
 
     // Set the LRU stack position of new line to be zero
-    repl[ setIndex ][ updateWayID ].LRUage = 0;
+    repl[ setIndex ][ updateWayID ].LRUstackposition = 0;
 }
 
 ////////////////////////////////////////////////////////////////////////////////
 //                                                                            //
-// This function implements the FIFO update routine for the traditional        //
-// FIFO  replacement policy. The arguments to the function are the physical     //
+// This function implements the mru update routine for the traditional        //
+// mru replacement policy. The arguments to the function are the physical     //
 // way and set index.                                                         //
 //                                                                            //
 ////////////////////////////////////////////////////////////////////////////////
-// every hit has the same tag, meaning the same address, so hit doesn't need update
-void CACHE_REPLACEMENT_STATE::UpdateFIFO( UINT32 setIndex, UINT32 updateWayID, const LINE_STATE *currLine, bool cacheHit, Addr_t pc, UINT32 accessTyle)
+void CACHE_REPLACEMENT_STATE::UpdateMRU( UINT32 setIndex, INT32 updateWayID )
 {
-    if(!cacheHit){
-        for(UINT32 way=0; way<assoc; way++){
-            if(way == 0){
-                myRepl[ setIndex ][ way ].FIFOstackposition = myRepl[ setIndex ][ assoc-1 ].FIFOstackposition;
-            }else{
-                myRepl[ setIndex ][ way ].FIFOstackposition = myRepl[ setIndex ][ way-1 ].FIFOstackposition;
-            }
+    // Determine current MRU stack position
+    UINT32 currMRUstackposition = mruRepl[ setIndex ][ updateWayID ].MRUstackposition;
+
+    // Update the stack position of all lines before the current line
+    // Update implies incremeting their stack positions by one
+    for(UINT32 lineIndx=0; lineIndx<assoc; lineIndx++) 
+    {
+        if( mruRepl[setIndex][lineIndx].MRUstackposition < currMRUstackposition ) 
+        {
+            mruRepl[setIndex][lineIndx].MRUstackposition++;
         }
     }
+
+    // Set the MRU stack position of new line to be zero
+    mruRepl[ setIndex ][ updateWayID ].MRUstackposition = 0;
 }
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -303,7 +308,7 @@ ostream & CACHE_REPLACEMENT_STATE::PrintStats(ostream &out)
     }else if(replPolicy == CRC_REPL_RANDOM){
         out<<"RANDOM"<<endl;
     }else{
-        out<<"FIFO"<<endl;
+        out<<"MRU"<<endl;
     }
     return out;
     
