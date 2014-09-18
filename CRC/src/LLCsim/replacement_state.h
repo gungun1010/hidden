@@ -44,7 +44,7 @@ typedef struct
     UINT32  LRUage;
 
     // CONTESTANTS: Add extra state per cache line here
-    UINT32  MRUage;
+    UINT32  cacheLineAge;
 } LINE_REPLACEMENT_STATE;
 
 //set miss threshold
@@ -69,8 +69,8 @@ class CACHE_REPLACEMENT_STATE
 
     // CONTESTANTS:  Add extra state for cache here
     LINE_REPLACEMENT_STATE  **myRepl;
-    MISS_PROPOTION  missProp;
-    SWITCHABLE_POLICY    switcher;
+    MISS_PROPOTION  prob;
+    SWITCHABLE_POLICY    currPolicy;
   public:
 
     // The constructor CAN NOT be changed
@@ -97,7 +97,7 @@ class CACHE_REPLACEMENT_STATE
     INT32   Get_MRU_Victim( UINT32 setIndex );
     void   UpdateLRU( UINT32 setIndex, INT32 updateWayID );
     void    UpdateMRU( UINT32 setIndex, INT32 updateWayID, bool cacheHit);
-    void    PolicySwitcher(bool cacheHit);
+    void    probMissRate(bool cacheHit);
 };
 
 

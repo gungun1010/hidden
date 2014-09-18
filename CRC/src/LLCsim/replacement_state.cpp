@@ -39,9 +39,9 @@ CACHE_REPLACEMENT_STATE::CACHE_REPLACEMENT_STATE( UINT32 _sets, UINT32 _assoc, U
 
     mytimer    = 0;
     
-    missProp.access = 0;
-    missProp.miss = 0;
-    switcher = MRU;
+    prob.access = 0;
+    prob.miss = 0;
+    currPolicy = MRU;
 
     InitReplacementState();
 }
@@ -88,7 +88,7 @@ void CACHE_REPLACEMENT_STATE::InitReplacementState()
         {
             // initialize stack position (for MRU)
             // 0 being MRU, ASSOC-1 being LRU
-            myRepl[ setIndex ][ lineIndx ].MRUage = lineIndx;
+            myRepl[ setIndex ][ lineIndx ].cacheLineAge = lineIndx;
         }
     }
 }
@@ -232,14 +232,14 @@ INT32 CACHE_REPLACEMENT_STATE::Get_MRU_Victim( UINT32 setIndex )
     {
 
         //default policy is MRU, and default to not switch to LRU
-        if(switcher == MRU){
-            if( replSet[lineIndx].MRUage == 0 ) 
+        if(currPolicy == MRU){
+            if( replSet[lineIndx].cacheLineAge == 0 ) 
             {
                 line = lineIndx;
                 break;
             }
-        }else if(switcher == LRU){
-           if( replSet[lineIndx].MRUage == (assoc-1) ) 
+        }else if(currPolicy == LRU){
+           if( replSet[lineIndx].cacheLineAge == (assoc-1) ) 
             {
                 line= lineIndx;
                 break;
@@ -286,22 +286,22 @@ void CACHE_REPLACEMENT_STATE::UpdateLRU( UINT32 setIndex, INT32 updateWayID )
 void CACHE_REPLACEMENT_STATE::UpdateMRU( UINT32 setIndex, INT32 updateWayID, bool cacheHit )
 {
     // Determine current MRU stack position
-    UINT32 currMRUage = myRepl[ setIndex ][ updateWayID ].MRUage;
+    UINT32 currcacheLineAge = myRepl[ setIndex ][ updateWayID ].cacheLineAge;
     
-    PolicySwitcher(cacheHit);
+    probMissRate(cacheHit);
     
     // Update the stack position of all lines before the current line
     // Update implies incremeting their stack positions by one
     for(UINT32 lineIndx=0; lineIndx<assoc; lineIndx++) 
     {
-        if( myRepl[setIndex][lineIndx].MRUage < currMRUage ) 
+        if( myRepl[setIndex][lineIndx].cacheLineAge < currcacheLineAge ) 
         {
-            myRepl[setIndex][lineIndx].MRUage++;
+            myRepl[setIndex][lineIndx].cacheLineAge++;
         }
     }
 
     // Set the MRU stack position of new line to be zero
-    myRepl[ setIndex ][ updateWayID ].MRUage = 0;
+    myRepl[ setIndex ][ updateWayID ].cacheLineAge = 0;
 }
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -310,27 +310,30 @@ void CACHE_REPLACEMENT_STATE::UpdateMRU( UINT32 setIndex, INT32 updateWayID, boo
 // return true to switch policy, falsue to not switch                         //
 //                                                                            //
 ////////////////////////////////////////////////////////////////////////////////
-void CACHE_REPLACEMENT_STATE::PolicySwitcher(bool cacheHit){
+void CACHE_REPLACEMENT_STATE::probMissRate(bool cacheHit){
     
     //count the total access 
-    missProp.access++;
+    prob.access++;
 
     //count the miss
     if(!cacheHit){
-       missProp.miss++;
+       prob.miss++;
     }
   
-    //check if we want to switch on every 100 access 
-    if(missProp.access >= SWITCH_MARGIN){ 
-        if((missProp.miss * SWITCH_THRES) > missProp.access){
-            if(switcher == MRU){
-                switcher = LRU;
-            }else if(switcher == LRU){
-                switcher = MRU;
+    //check if we want to switch on every SWITCH_MARGIN access 
+    //we switch if the miss rate is more than SWITCH_MARGIN*10 %
+    if(prob.access >= SWITCH_MARGIN){ 
+        if((prob.miss * SWITCH_THRES) > prob.access){
+            if(currPolicy == MRU){
+                currPolicy = LRU;
+            }else if(currPolicy == LRU){
+                currPolicy = MRU;
             }
         }
-        missProp.access = 0;
-        missProp.miss = 0;
+
+        //reset prob for next cycle (next SWITCH_MARGIN access)
+        prob.access = 0;
+        prob.miss = 0;
     }
 }
 ////////////////////////////////////////////////////////////////////////////////
