@@ -21,6 +21,8 @@
 #include "utils.h"
 #include "crc_cache_defs.h"
 
+#define SWITCH_THRES 3
+#define SWITCH_MARGIN 100
 // Replacement Policies Supported
 typedef enum 
 {
@@ -29,25 +31,34 @@ typedef enum
     CRC_REPL_CONTESTANT = 2
 } ReplacemntPolicy;
 
+//switchable policy supported
+typedef enum
+{
+    MRU = 0,
+    LRU = 1
+}SWITCHABLE_POLICY;
+
 // Replacement State Per Cache Line
 typedef struct
 {
-    UINT32  LRUstackposition;
+    UINT32  LRUage;
 
     // CONTESTANTS: Add extra state per cache line here
-
-    bool prediction;
-
+    UINT32  MRUage;
 } LINE_REPLACEMENT_STATE;
 
-struct sampler; // Jimenez's structures
+//set miss threshold
+typedef struct
+{
+    UINT32 access;
+    UINT32 miss;
+} MISS_PROPOTION;
 
 // The implementation for the cache replacement policy
 class CACHE_REPLACEMENT_STATE
 {
-  private:
-	void register_prediction (bool mis);
 
+  private:
     UINT32 numsets;
     UINT32 assoc;
     UINT32 replPolicy;
@@ -57,30 +68,25 @@ class CACHE_REPLACEMENT_STATE
     COUNTER mytimer;  // tracks # of references to the cache
 
     // CONTESTANTS:  Add extra state for cache here
-
-    // Jimenez's code
-
-    // sampler data structure
-
-    sampler *samp;
-
+    LINE_REPLACEMENT_STATE  **myRepl;
+    MISS_PROPOTION  missProp;
+    SWITCHABLE_POLICY    switcher;
   public:
-    ostream & PrintStats(ostream &out);
 
     // The constructor CAN NOT be changed
     CACHE_REPLACEMENT_STATE( UINT32 _sets, UINT32 _assoc, UINT32 _pol );
 
-    INT32 GetVictimInSet( UINT32 tid, UINT32 setIndex, const LINE_STATE *vicSet, UINT32 assoc, Addr_t PC, Addr_t paddr, UINT32 accessType );
-
+    INT32  GetVictimInSet( UINT32 tid, UINT32 setIndex, const LINE_STATE *vicSet, UINT32 assoc, Addr_t PC, Addr_t paddr, UINT32 accessType );
     void   UpdateReplacementState( UINT32 setIndex, INT32 updateWayID );
 
     void   SetReplacementPolicy( UINT32 _pol ) { replPolicy = _pol; } 
+    
     void   IncrementTimer() { mytimer++; } 
 
     void   UpdateReplacementState( UINT32 setIndex, INT32 updateWayID, const LINE_STATE *currLine, 
                                    UINT32 tid, Addr_t PC, UINT32 accessType, bool cacheHit );
 
-    ~CACHE_REPLACEMENT_STATE(void);
+    ostream&   PrintStats( ostream &out);
 
   private:
     
@@ -88,69 +94,11 @@ class CACHE_REPLACEMENT_STATE
     INT32  Get_Random_Victim( UINT32 setIndex );
 
     INT32  Get_LRU_Victim( UINT32 setIndex );
+    INT32   Get_MRU_Victim( UINT32 setIndex );
     void   UpdateLRU( UINT32 setIndex, INT32 updateWayID );
-
-    // Jimenez's code
-
-    //INT32  Get_Sampler_Victim( UINT32 setIndex );
-    INT32 Get_Sampler_Victim ( UINT32 tid, UINT32 setIndex, const LINE_STATE *vicSet, UINT32 assoc, Addr_t PC, Addr_t paddr, UINT32 accessType );
-
-    void   UpdateSampler ( UINT32 setIndex, Addr_t tag, UINT32 tid, Addr_t PC, INT32 updateWayID, bool hit);
-
+    void    UpdateMRU( UINT32 setIndex, INT32 updateWayID, bool cacheHit);
+    void    PolicySwitcher(bool cacheHit);
 };
 
-// Jimenez's sampler code
 
-struct sampler_entry {
-	unsigned int 	
-		lru_stack_position,
-		tag,
-		trace,
-		prediction;
-		
-	bool
-		valid;
-
-	// constructor for sampler entry
-
-	sampler_entry (void) {
-		lru_stack_position = 0;
-		valid = false;
-		tag = 0;
-		trace = 0;
-		prediction = 0;
-	};
-};
-
-// one sampler set (just a pointer to the entries)
-
-struct sampler_set {
-	sampler_entry *blocks;
-
-	sampler_set (void);
-};
-
-// the dead block predictor
-
-struct predictor {
-	int **tables; 	// tables of two-bit counters
-
-	predictor (void);
-	unsigned int get_table_index (UINT32 tid, unsigned int, int t);
-	bool get_prediction (UINT32 tid, unsigned int trace, int set);
-	void block_is_dead (UINT32 tid, unsigned int, bool);
-};
-
-// the sampler
-
-struct sampler {
-	sampler_set *sets;
-	int 
-		nsampler_sets,   // number of sampler sets
-		sampler_modulus; // determines which LLC sets are sampler sets
-
-	predictor *pred;
-	sampler (int nsets, int assoc);
-	void access (UINT32 tid, int set, Addr_t tag, Addr_t PC);
-};
 #endif
