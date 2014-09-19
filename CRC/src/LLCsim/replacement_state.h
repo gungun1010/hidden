@@ -94,7 +94,7 @@ class CACHE_REPLACEMENT_STATE
     INT32  Get_Random_Victim( UINT32 setIndex );
 
     INT32  Get_LRU_Victim( UINT32 setIndex );
-    INT32   Get_MRU_Victim( UINT32 setIndex );
+    INT32   Get_SWITCH_Victim( UINT32 setIndex );
     void   UpdateLRU( UINT32 setIndex, INT32 updateWayID );
     void    UpdateSWITCH( UINT32 setIndex, INT32 updateWayID, bool cacheHit);
     void    probMissRate(bool cacheHit);

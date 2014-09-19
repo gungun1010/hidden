@@ -123,7 +123,7 @@ INT32 CACHE_REPLACEMENT_STATE::GetVictimInSet( UINT32 tid, UINT32 setIndex, cons
     else if( replPolicy == CRC_REPL_CONTESTANT )
     {
         // Contestants:  ADD YOUR VICTIM SELECTION FUNCTION HERE
-        return Get_MRU_Victim( setIndex );
+        return Get_SWITCH_Victim( setIndex );
     }
 
     // We should never get here
@@ -220,7 +220,7 @@ INT32 CACHE_REPLACEMENT_STATE::Get_Random_Victim( UINT32 setIndex )
 // while bottom of LRU stack is 'assoc-1'                                     //
 //                                                                            //
 ////////////////////////////////////////////////////////////////////////////////
-INT32 CACHE_REPLACEMENT_STATE::Get_MRU_Victim( UINT32 setIndex )
+INT32 CACHE_REPLACEMENT_STATE::Get_SWITCH_Victim( UINT32 setIndex )
 {
     // Get pointer to replacement state of current set
     LINE_REPLACEMENT_STATE *replSet = myRepl[ setIndex ];
