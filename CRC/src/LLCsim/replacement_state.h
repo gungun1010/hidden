@@ -34,8 +34,8 @@ typedef enum
 //switchable policy supported
 typedef enum
 {
-    MRU = 0,
-    LRU = 1
+    LRU = 0,
+    CLOCK = 1
 }SWITCHABLE_POLICY;
 
 // Replacement State Per Cache Line
@@ -45,6 +45,7 @@ typedef struct
 
     // CONTESTANTS: Add extra state per cache line here
     UINT32  cacheLineAge;
+    bool    used;
 } LINE_REPLACEMENT_STATE;
 
 //set miss threshold
@@ -71,6 +72,7 @@ class CACHE_REPLACEMENT_STATE
     LINE_REPLACEMENT_STATE  **myRepl;
     MISS_PROPOTION  prob;
     SWITCHABLE_POLICY    currPolicy;
+    UINT8   *hand;
   public:
 
     // The constructor CAN NOT be changed

@@ -41,7 +41,7 @@ CACHE_REPLACEMENT_STATE::CACHE_REPLACEMENT_STATE( UINT32 _sets, UINT32 _assoc, U
     
     prob.access = 0;
     prob.miss = 0;
-    currPolicy = MRU;
+    currPolicy = LRU;
 
     InitReplacementState();
 }
@@ -76,6 +76,7 @@ void CACHE_REPLACEMENT_STATE::InitReplacementState()
     //when we have more than say 30% miss rate, we switch policy 
     // Contestants:  ADD INITIALIZATION FOR YOUR HARDWARE HERE
     myRepl = new LINE_REPLACEMENT_STATE* [ numsets ];
+    hand = new UINT8 [numsets];
     // ensure that we were able to create replacement state
     assert(myRepl);
     
@@ -83,12 +84,14 @@ void CACHE_REPLACEMENT_STATE::InitReplacementState()
     for(UINT32 setIndex=0; setIndex<numsets; setIndex++) 
     {
         myRepl[ setIndex ]  = new LINE_REPLACEMENT_STATE[ assoc ];
-
+        hand[ setIndex ] = 0; //initially, hand is pointing at first line in each set
+        
         for(UINT32 lineIndx=0; lineIndx<assoc; lineIndx++) 
         {
             // initialize stack position (for MRU)
             // 0 being MRU, ASSOC-1 being LRU
             myRepl[ setIndex ][ lineIndx ].cacheLineAge = lineIndx;
+            myRepl[ setIndex ][ lineIndx ].used = false;
         }
     }
 }
@@ -227,23 +230,36 @@ INT32 CACHE_REPLACEMENT_STATE::Get_SWITCH_Victim( UINT32 setIndex )
 
     INT32   line = 0;
 
-    // Search for victim whose stack position is assoc-1
-    for(UINT32 lineIndx=0; lineIndx<assoc; lineIndx++) 
-    {
 
-        //default policy is MRU, and default to not switch to LRU
-        if(currPolicy == MRU){
-            if( replSet[lineIndx].cacheLineAge == 0 ) 
+    //default policy is MRU, and default to not switch to CLOCK
+    if(currPolicy == LRU){
+        for(UINT32 lineIndx=0; lineIndx<assoc; lineIndx++) 
+        {
+            if( replSet[lineIndx].cacheLineAge == (assoc-1) ) 
             {
                 line = lineIndx;
                 break;
             }
-        }else if(currPolicy == LRU){
-           if( replSet[lineIndx].cacheLineAge == (assoc-1) ) 
-            {
-                line= lineIndx;
-                break;
-            }
+        }
+    }else if(currPolicy == CLOCK){// Famous CLOCK policy
+        for(;;){
+           //if we find an unused cache line, this is the victim
+           if(!(replSet[ hand[ setIndex ] ].used) ){
+               line = hand[ setIndex ];
+               break;
+           }else{
+               //if the current cache line the hand is pointing to is used, we reset
+               //then the hand points to next cache line 
+               replSet[ hand[ setIndex ] ].used = false;
+      
+               hand[ setIndex ]++;
+
+               //We have fixed 16-way assoc
+               //so the hand circles back at the last one
+               if(hand[ setIndex ] > 0xf){
+                   hand[ setIndex ] = 0;
+               }
+           }
         }
     }
 
@@ -290,18 +306,24 @@ void CACHE_REPLACEMENT_STATE::UpdateSWITCH( UINT32 setIndex, INT32 updateWayID, 
     
     probMissRate(cacheHit);
     
-    // Update the stack position of all lines before the current line
-    // Update implies incremeting their stack positions by one
-    for(UINT32 lineIndx=0; lineIndx<assoc; lineIndx++) 
-    {
-        if( myRepl[setIndex][lineIndx].cacheLineAge < currcacheLineAge ) 
+    if(currPolicy == LRU){
+        // Update the stack position of all lines before the current line
+        // Update implies incremeting their stack positions by one
+        for(UINT32 lineIndx=0; lineIndx<assoc; lineIndx++) 
         {
-            myRepl[setIndex][lineIndx].cacheLineAge++;
+            if( myRepl[setIndex][lineIndx].cacheLineAge < currcacheLineAge ) 
+            {
+                myRepl[setIndex][lineIndx].cacheLineAge++;
+            }
+        }
+
+        // Set the MRU stack position of new line to be zero
+        myRepl[ setIndex ][ updateWayID ].cacheLineAge = 0;
+    }else{
+        if(cacheHit){ 
+            myRepl[ setIndex ][ updateWayID ].used = true;
         }
     }
-
-    // Set the MRU stack position of new line to be zero
-    myRepl[ setIndex ][ updateWayID ].cacheLineAge = 0;
 }
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -324,10 +346,10 @@ void CACHE_REPLACEMENT_STATE::probMissRate(bool cacheHit){
     //we switch if the miss rate is more than SWITCH_MARGIN*10 %
     if(prob.access >= SWITCH_MARGIN){ 
         if((prob.miss * SWITCH_THRES) > prob.access){
-            if(currPolicy == MRU){
+            if(currPolicy == LRU){
+                currPolicy = CLOCK;
+            }else if(currPolicy == CLOCK){
                 currPolicy = LRU;
-            }else if(currPolicy == LRU){
-                currPolicy = MRU;
             }
         }
 

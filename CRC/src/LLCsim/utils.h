@@ -35,7 +35,7 @@ using namespace std;
 #define COUNTER     unsigned long long
 #define BITVECTOR   unsigned long long
 #define Addr_t      unsigned long long
-
+#define UINT8       unsigned char
 #else
 
 #include "common.h"
