@@ -22,8 +22,9 @@
 
 // IMPORTANT NOTE: DO NOT CHANGE ANYTHING IN THIS HEADER FILE. Changing anything
 // in here will violate the competition rules.
-
 #include <string>
+#include <cstring>
+#include <algorithm>
 #include <iostream>
 using namespace std;
 
@@ -36,6 +37,7 @@ using namespace std;
 #define BITVECTOR   unsigned long long
 #define Addr_t      unsigned long long
 #define UINT8       unsigned char
+#define INT8        char
 #else
 
 #include "common.h"

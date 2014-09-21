@@ -23,6 +23,11 @@
 
 #define SWITCH_THRES 3
 #define SWITCH_MARGIN 100
+#define SHADOW_SIZE 7
+#define INIT_BOUNDARY SHADOW_SIZE+8 // SHADOW_SIZE + LRU List (8)
+#define INIT_LRU_SIZE SHADOW_SIZE+8   // indicate the size of LRU List
+#define DEAD_ENTRY 31  // 5-bit directory, so 31 is maximum
+#define DIRECTORY_SIZE 16+SHADOW_SIZE+SHADOW_SIZE   //16 means fixed 16-way assoc, hard-code here, no other choices..
 // Replacement Policies Supported
 typedef enum 
 {
@@ -34,7 +39,7 @@ typedef enum
 //switchable policy supported
 typedef enum
 {
-    LRU = 0,
+    ARC = 0,
     CLOCK = 1
 }SWITCHABLE_POLICY;
 
@@ -44,7 +49,6 @@ typedef struct
     UINT32  LRUage;
 
     // CONTESTANTS: Add extra state per cache line here
-    UINT32  cacheLineAge;
     bool    used;
 } LINE_REPLACEMENT_STATE;
 
@@ -70,9 +74,12 @@ class CACHE_REPLACEMENT_STATE
 
     // CONTESTANTS:  Add extra state for cache here
     LINE_REPLACEMENT_STATE  **myRepl;
-    MISS_PROPOTION  prob;
-    SWITCHABLE_POLICY    currPolicy;
-    UINT8   *hand;
+    MISS_PROPOTION          prob;       //used for SWITCH
+    SWITCHABLE_POLICY       currPolicy; //used for SWITCH
+    UINT8   *hand;                      //used for CLOCK, 4-bit in use
+    UINT8   **directory;    //used for ARC, 4-bit/slot, DIRECTORY_SIZE  slots,directory stores lineID/wayID
+    UINT8   *boundary;      //used for ARC, LRU-side inclusive, [0,30]
+    UINT8   *indicator;     //used for ARC, 5-bit in use, [0,30]
   public:
 
     // The constructor CAN NOT be changed
