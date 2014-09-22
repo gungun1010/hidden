@@ -23,11 +23,7 @@
 
 #define SWITCH_THRES 3
 #define SWITCH_MARGIN 100
-#define SHADOW_SIZE 7
-#define INIT_BOUNDARY SHADOW_SIZE+8 // SHADOW_SIZE + LRU List (8)
-#define INIT_LRU_SIZE SHADOW_SIZE+8   // indicate the size of LRU List
-#define DEAD_ENTRY 31  // 5-bit directory, so 31 is maximum
-#define DIRECTORY_SIZE 16+SHADOW_SIZE+SHADOW_SIZE   //16 means fixed 16-way assoc, hard-code here, no other choices..
+#define SCORE_CHECK_ROUND 5
 // Replacement Policies Supported
 typedef enum 
 {
@@ -39,7 +35,7 @@ typedef enum
 //switchable policy supported
 typedef enum
 {
-    ARC = 0,
+    LRU = 0,
     CLOCK = 1
 }SWITCHABLE_POLICY;
 
@@ -49,6 +45,7 @@ typedef struct
     UINT32  LRUage;
 
     // CONTESTANTS: Add extra state per cache line here
+    UINT32  cacheLineAge;
     bool    used;
 } LINE_REPLACEMENT_STATE;
 
@@ -59,6 +56,12 @@ typedef struct
     UINT32 miss;
 } MISS_PROPOTION;
 
+//scoreboard for each policy
+typedef struct
+{
+    COUNTER lru;
+    COUNTER clock;
+}SCORE_BOARD;
 // The implementation for the cache replacement policy
 class CACHE_REPLACEMENT_STATE
 {
@@ -74,12 +77,10 @@ class CACHE_REPLACEMENT_STATE
 
     // CONTESTANTS:  Add extra state for cache here
     LINE_REPLACEMENT_STATE  **myRepl;
-    MISS_PROPOTION          prob;       //used for SWITCH
-    SWITCHABLE_POLICY       currPolicy; //used for SWITCH
-    UINT8   *hand;                      //used for CLOCK, 4-bit in use
-    UINT8   **directory;    //used for ARC, 4-bit/slot, DIRECTORY_SIZE  slots,directory stores lineID/wayID
-    UINT8   *boundary;      //used for ARC, LRU-side inclusive, [0,30]
-    UINT8   *indicator;     //used for ARC, 5-bit in use, [0,30]
+    MISS_PROPOTION  prob;
+    SCORE_BOARD     score;
+    SWITCHABLE_POLICY    currPolicy;
+    UINT8   *hand;
   public:
 
     // The constructor CAN NOT be changed
@@ -104,6 +105,8 @@ class CACHE_REPLACEMENT_STATE
 
     INT32  Get_LRU_Victim( UINT32 setIndex );
     INT32   Get_SWITCH_Victim( UINT32 setIndex );
+    void    Get_MyLRU_Victim(UINT32 setIndex, INT32 &line);
+    void    Get_MyCLOCK_Victim(UINT32 setIndex, INT32 &line);
     void   UpdateLRU( UINT32 setIndex, INT32 updateWayID );
     void    UpdateSWITCH( UINT32 setIndex, INT32 updateWayID, bool cacheHit);
     void    probMissRate(bool cacheHit);

@@ -42,6 +42,8 @@ CACHE_REPLACEMENT_STATE::CACHE_REPLACEMENT_STATE( UINT32 _sets, UINT32 _assoc, U
     prob.access = 0;
     prob.miss = 0;
     currPolicy = CLOCK;
+    score.lru = 0;
+    score.clock = 1;
 
     InitReplacementState();
 }
@@ -72,38 +74,26 @@ void CACHE_REPLACEMENT_STATE::InitReplacementState()
         }
     }
 
-    //CLOCK+ARC
+    //MRU+LRU
     //when we have more than say 30% miss rate, we switch policy 
     // Contestants:  ADD INITIALIZATION FOR YOUR HARDWARE HERE
     myRepl = new LINE_REPLACEMENT_STATE* [ numsets ];
     hand = new UINT8 [numsets];
-    directory = new UINT8* [numsets];
-    boundary = new UINT8 [numsets];
-    indicator = new UINT8 [numsets];
-   // ensure that we were able to create replacement state
+    // ensure that we were able to create replacement state
     assert(myRepl);
-   
-    //initilize boundary to the middle position of the directory 
-    memset(boundary, INIT_BOUNDARY, sizeof(boundary));
-
-    //initlizie indicator to the same position of the boundary
-    memset(indicator, INIT_LRU_SIZE, sizeof(indicator));   
-
+    
     // Create the state for the sets
     for(UINT32 setIndex=0; setIndex<numsets; setIndex++) 
     {
         myRepl[ setIndex ]  = new LINE_REPLACEMENT_STATE[ assoc ];
         hand[ setIndex ] = 0; //initially, hand is pointing at first line in each set
         
-        //allocate directory spaces for each set
-        directory[ setIndex ] = new UINT8[ assoc + SHADOW_SIZE*2 ];
-        
-
         for(UINT32 lineIndx=0; lineIndx<assoc; lineIndx++) 
         {
-            //default to unused for each cache line for CLOCK
+            // initialize stack position (for MRU)
+            // 0 being MRU, ASSOC-1 being LRU
+            myRepl[ setIndex ][ lineIndx ].cacheLineAge = lineIndx;
             myRepl[ setIndex ][ lineIndx ].used = false;
-            directory[ setIndex ][SHADOW_SIZE+lineIndx]=lineIndx;
         }
     }
 }
@@ -216,6 +206,48 @@ INT32 CACHE_REPLACEMENT_STATE::Get_LRU_Victim( UINT32 setIndex )
     return lruWay;
 }
 
+void CACHE_REPLACEMENT_STATE::Get_MyLRU_Victim(UINT32 setIndex,INT32 &line)
+{
+    // Get pointer to replacement state of current set
+    LINE_REPLACEMENT_STATE *replSet = myRepl[ setIndex ];
+
+    for(UINT32 lineIndx=0; lineIndx<assoc; lineIndx++) 
+    {
+        if( replSet[lineIndx].cacheLineAge == (assoc-1) ) 
+        {
+            line = lineIndx;
+            break;
+        }
+    }
+}
+
+
+void CACHE_REPLACEMENT_STATE::Get_MyCLOCK_Victim(UINT32 setIndex,INT32 &line)
+{
+    
+    LINE_REPLACEMENT_STATE *replSet = myRepl[ setIndex ];
+    
+    for(;;){
+       //if we find an unused cache line, this is the victim
+       if(!(replSet[ hand[ setIndex ] ].used) ){
+           line = hand[ setIndex ];
+           break;
+       }else{
+           //if the current cache line the hand is pointing to is used, we reset
+           //then the hand points to next cache line 
+           replSet[ hand[ setIndex ] ].used = false;
+  
+           hand[ setIndex ]++;//hand pointing to next cacheline unused
+
+           //We have fixed 16-way assoc
+           //so the hand circles back at the last one
+           if(hand[ setIndex ] > 0xf){
+               hand[ setIndex ] = 0;
+           }
+       }
+    }
+}
+
 ////////////////////////////////////////////////////////////////////////////////
 //                                                                            //
 // This function finds a random victim in the cache set                       //
@@ -230,52 +262,33 @@ INT32 CACHE_REPLACEMENT_STATE::Get_Random_Victim( UINT32 setIndex )
 
 ////////////////////////////////////////////////////////////////////////////////
 //                                                                            //
-// This function finds the MRU victim in the cache set by returning the       //
+// This function finds the SWITCH victim in the cache set by returning the       //
 // cache block at the top  of the LRU stack. Top of LRU stack is '0'          //
 // while bottom of LRU stack is 'assoc-1'                                     //
 //                                                                            //
 ////////////////////////////////////////////////////////////////////////////////
 INT32 CACHE_REPLACEMENT_STATE::Get_SWITCH_Victim( UINT32 setIndex )
 {
-    // Get pointer to replacement state of current set
-    LINE_REPLACEMENT_STATE *replSet = myRepl[ setIndex ];
+    INT32   line=0;
 
-    INT32   line = 0;
-
-    //default policy is ARC, and default to not switch to CLOCK
-    if(currPolicy == ARC){
-       //determine indicator position relative to boundary
-       if(indicator[setIndex] > boundary[setIndex]){//LFU
-           line = directory[ setIndex ][SHADOW_SIZE+assoc-1];
-       }else{//LRU, boundary is inclusive to LRU
-           line = directory[ setIndex ][SHADOW_SIZE];
-       }
+    //default policy is MRU, and default to not switch to CLOCK
+    if(currPolicy == LRU){
+        if(score.lru >= score.clock){
+            Get_MyLRU_Victim(setIndex,line);
+        }else{
+            Get_MyCLOCK_Victim(setIndex,line);
+        }        
     }else if(currPolicy == CLOCK){// Famous CLOCK policy
-        for(;;){
-           //if we find an unused cache line, this is the victim
-           if(!(replSet[ hand[ setIndex ] ].used) ){
-               line = hand[ setIndex ];
-               break;
-           }else{
-               //if the current cache line the hand is pointing to is used, we reset
-               //then the hand points to next cache line 
-               replSet[ hand[ setIndex ] ].used = false;
-      
-               hand[ setIndex ]++;//hand pointing to next cache line
-
-               //We have fixed 16-way assoc
-               //so the hand circles back at the last one
-               if(hand[ setIndex ] > 0xf){
-                   hand[ setIndex ] = 0;
-               }
-           }
+        if(score.clock >= score.lru){
+            Get_MyCLOCK_Victim(setIndex,line);
+        }else{
+            Get_MyLRU_Victim(setIndex,line);
         }
     }
 
     // return mru line
     return line;
 }
-
 ////////////////////////////////////////////////////////////////////////////////
 //                                                                            //
 // This function implements the LRU update routine for the traditional        //
@@ -311,67 +324,25 @@ void CACHE_REPLACEMENT_STATE::UpdateLRU( UINT32 setIndex, INT32 updateWayID )
 ////////////////////////////////////////////////////////////////////////////////
 void CACHE_REPLACEMENT_STATE::UpdateSWITCH( UINT32 setIndex, INT32 updateWayID, bool cacheHit )
 {
-    UINT8 *finder;
+    // Determine current MRU stack position
+    UINT32 currcacheLineAge = myRepl[ setIndex ][ updateWayID ].cacheLineAge;
+    
     probMissRate(cacheHit);
     
-    if(currPolicy == ARC){
-        ////////////////////////////////////////////////////////////////////
-        //              List Update                                       //
-        ////////////////////////////////////////////////////////////////////        
-        UINT8* LRUStart = directory[setIndex];
-        UINT8* LRUEnd = directory[setIndex]+boundary[setIndex]+1;//+1 since boundary is LRU inclusive
-        finder = std::find (LRUStart, LRUEnd, (UINT8)updateWayID);
-       
-        //shifting the elements accordingly 
-        if(finder != LRUEnd){
-            //if we can find this wayID in the LRU list, 
-            //meaning it is frequently used, move to LFU list
-            //shift w/e in LFU list outwards 
-            for(UINT32 i = boundary[setIndex]+1;i<DIRECTORY_SIZE-1; i++){
-                directory[setIndex][i+1]=directory[setIndex][i];
-            }
-           directory[setIndex][boundary[setIndex]+1]=(UINT8)updateWayID;
-        }else{
-            //if this wayID is not in the current LRU list,
-            //we stack it up at MRU position(boundary)
-            for(UINT32 j = boundary[setIndex];j>=1; j--){
-                directory[setIndex][j-1]=directory[setIndex][j];
-            }
-            directory[setIndex][boundary[setIndex]]=(UINT8)updateWayID;
-        }
-
-        /////////////////////////////////////////////////////////////////////
-        //              Indicator and boundary update                      //
-        /////////////////////////////////////////////////////////////////////
-        if(cacheHit){
-            //below defines the lower and upper address bound of the LRU shadow
-            UINT8* LRUShadowStart = directory[setIndex];
-            UINT8* LRUShadowEnd = directory[setIndex] + SHADOW_SIZE;//FIXME: can indicator goes into shadow? I dont think so
-            finder = std::find (LRUShadowStart, LRUShadowEnd, (UINT8)updateWayID);
-
-            if(finder != LRUShadowEnd){//if the block is in LRU shadow
-                indicator[setIndex] = indicator[setIndex] == SHADOW_SIZE+assoc-1? 
-                indicator[setIndex]:indicator[setIndex]++;
-            }
-           
-            //below defins the lower and uppoer address bound of the LFU shadow 
-            UINT8* LFUShadowStart = directory[setIndex] + SHADOW_SIZE + assoc;
-            UINT8* LFUShadowEnd = directory[setIndex] + SHADOW_SIZE + assoc + SHADOW_SIZE;
-            finder = std::find (LFUShadowStart, LFUShadowEnd, (UINT8)updateWayID);
-            
-            if(finder != LFUShadowEnd){//if the block is in LFU shadow
-                indicator[setIndex] = indicator[setIndex] == SHADOW_SIZE? 
-                indicator[setIndex]:indicator[setIndex]--;
-            }
-        }else{
-            if(boundary[ setIndex ] > indicator[ setIndex ]){
-                boundary[ setIndex ]--;
-            }else if(boundary[ setIndex ] < indicator[ setIndex ]){
-                boundary[ setIndex ]++;
+    if(currPolicy == LRU){
+        // Update the stack position of all lines before the current line
+        // Update implies incremeting their stack positions by one
+        for(UINT32 lineIndx=0; lineIndx<assoc; lineIndx++) 
+        {
+            if( myRepl[setIndex][lineIndx].cacheLineAge < currcacheLineAge ) 
+            {
+                myRepl[setIndex][lineIndx].cacheLineAge++;
             }
         }
 
-    }else{//if im not in ARC, i only do update for CLOCK
+        // Set the MRU stack position of new line to be zero
+        myRepl[ setIndex ][ updateWayID ].cacheLineAge = 0;
+    }else{
         if(cacheHit){ 
             myRepl[ setIndex ][ updateWayID ].used = true;
         }
@@ -396,21 +367,31 @@ void CACHE_REPLACEMENT_STATE::probMissRate(bool cacheHit){
   
     //check if we want to switch on every SWITCH_MARGIN access 
     //we switch if the miss rate is more than SWITCH_MARGIN*10 %
-/*    
+    
     if(prob.access >= SWITCH_MARGIN){ 
         if((prob.miss * SWITCH_THRES) > prob.access){
-            if(currPolicy == ARC){
+            if(currPolicy == LRU){
                 currPolicy = CLOCK;
             }else if(currPolicy == CLOCK){
-                currPolicy = ARC;
+                currPolicy = LRU;
+            }
+        }else{
+            if(currPolicy == LRU){
+                score.lru++;
+            }else if(currPolicy == CLOCK){
+                score.clock++;
             }
         }
-
+        
         //reset prob for next cycle (next SWITCH_MARGIN access)
         prob.access = 0;
         prob.miss = 0;
+
+        if((score.lru+score.clock)>SCORE_CHECK_ROUND){
+            score.lru = 0;
+            score.clock = 1;
+        }
     }
-    */
 }
 ////////////////////////////////////////////////////////////////////////////////
 //                                                                            //
@@ -430,7 +411,7 @@ ostream & CACHE_REPLACEMENT_STATE::PrintStats(ostream &out)
     }else if(replPolicy == CRC_REPL_RANDOM){
         out<<"RANDOM"<<endl;
     }else{
-        out<<"SWITCH"<<endl;
+        out<<"leon"<<endl;
     }
     return out;
     
