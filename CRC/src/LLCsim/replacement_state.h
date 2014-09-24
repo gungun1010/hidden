@@ -70,7 +70,8 @@ class CACHE_REPLACEMENT_STATE
     UINT32 numsets;
     UINT32 assoc;
     UINT32 replPolicy;
-    
+    UINT32 segBoundary; //boundary for half of the cache in SLRU
+     
     LINE_REPLACEMENT_STATE   **repl;
 
     COUNTER mytimer;  // tracks # of references to the cache

@@ -44,6 +44,7 @@ CACHE_REPLACEMENT_STATE::CACHE_REPLACEMENT_STATE( UINT32 _sets, UINT32 _assoc, U
     currPolicy = CLOCK;
     score.lru = 0;
     score.clock = 1;
+    segBoundary = assoc/2;
 
     InitReplacementState();
 }
@@ -213,7 +214,7 @@ void CACHE_REPLACEMENT_STATE::Get_MyLRU_Victim(UINT32 setIndex,INT32 &line)
 
     for(UINT32 lineIndx=0; lineIndx<assoc; lineIndx++) 
     {
-        if( replSet[lineIndx].cacheLineAge == (assoc-1) ) 
+        if( replSet[lineIndx].cacheLineAge == (segBoundary-1) ) 
         {
             line = lineIndx;
             break;
@@ -332,16 +333,30 @@ void CACHE_REPLACEMENT_STATE::UpdateSWITCH( UINT32 setIndex, INT32 updateWayID, 
     if(currPolicy == LRU){
         // Update the stack position of all lines before the current line
         // Update implies incremeting their stack positions by one
-        for(UINT32 lineIndx=0; lineIndx<assoc; lineIndx++) 
-        {
-            if( myRepl[setIndex][lineIndx].cacheLineAge < currcacheLineAge ) 
+        if(!cacheHit){//miss will always look for LRU in probationary region, so currcacheLineAge is always 7
+            for(UINT32 lineIndx=0; lineIndx<assoc; lineIndx++) 
             {
-                myRepl[setIndex][lineIndx].cacheLineAge++;
+                if( myRepl[setIndex][lineIndx].cacheLineAge < currcacheLineAge)
+                {
+                    myRepl[setIndex][lineIndx].cacheLineAge++;
+                }
             }
-        }
 
-        // Set the MRU stack position of new line to be zero
-        myRepl[ setIndex ][ updateWayID ].cacheLineAge = 0;
+            // Set the MRU stack position of new line to be zero
+            myRepl[ setIndex ][ updateWayID ].cacheLineAge = 0;
+        }else{
+            //if cache hit, we put the hitted cacheline into a MRU position in protected region
+            for(UINT32 lineIndx=0; lineIndx<assoc; lineIndx++)
+            {
+                if( myRepl[setIndex][lineIndx].cacheLineAge < currcacheLineAge &&
+                    myRepl[setIndex][lineIndx].cacheLineAge >= segBoundary)
+                {
+                    myRepl[setIndex][lineIndx].cacheLineAge++;
+                }
+            }
+
+            myRepl[ setIndex ][ updateWayID ].cacheLineAge = segBoundary;
+        }
     }else{
         if(cacheHit){ 
             myRepl[ setIndex ][ updateWayID ].used = true;
