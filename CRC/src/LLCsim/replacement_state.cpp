@@ -41,10 +41,9 @@ CACHE_REPLACEMENT_STATE::CACHE_REPLACEMENT_STATE( UINT32 _sets, UINT32 _assoc, U
     
     prob.access = 0;
     prob.miss = 0;
-    currPolicy = CLOCK;
-    score.lru = 0;
-    score.clock = 1;
-    segBoundary = assoc/2;
+    currPolicy = CLOCK; //default to CLOCK biased 
+    score.lru = LRU_INIT_SCORE;
+    score.clock = CLOCK_INIT_SCORE; //score board is also CLOCK biased
 
     InitReplacementState();
 }
@@ -75,7 +74,7 @@ void CACHE_REPLACEMENT_STATE::InitReplacementState()
         }
     }
 
-    //MRU+LRU
+    //CLOCK+LRU
     //when we have more than say 30% miss rate, we switch policy 
     // Contestants:  ADD INITIALIZATION FOR YOUR HARDWARE HERE
     myRepl = new LINE_REPLACEMENT_STATE* [ numsets ];
@@ -91,9 +90,9 @@ void CACHE_REPLACEMENT_STATE::InitReplacementState()
         
         for(UINT32 lineIndx=0; lineIndx<assoc; lineIndx++) 
         {
-            // initialize stack position (for MRU)
-            // 0 being MRU, ASSOC-1 being LRU
+            //cacheLineAge is for LRU aging
             myRepl[ setIndex ][ lineIndx ].cacheLineAge = lineIndx;
+            //used flag is for clock
             myRepl[ setIndex ][ lineIndx ].used = false;
         }
     }
@@ -214,7 +213,7 @@ void CACHE_REPLACEMENT_STATE::Get_MyLRU_Victim(UINT32 setIndex,INT32 &line)
 
     for(UINT32 lineIndx=0; lineIndx<assoc; lineIndx++) 
     {
-        if( replSet[lineIndx].cacheLineAge == (segBoundary-1) ) 
+        if( replSet[lineIndx].cacheLineAge == (assoc-1) ) 
         {
             line = lineIndx;
             break;
@@ -333,30 +332,16 @@ void CACHE_REPLACEMENT_STATE::UpdateSWITCH( UINT32 setIndex, INT32 updateWayID, 
     if(currPolicy == LRU){
         // Update the stack position of all lines before the current line
         // Update implies incremeting their stack positions by one
-        if(!cacheHit){//miss will always look for LRU in probationary region, so currcacheLineAge is always 7
-            for(UINT32 lineIndx=0; lineIndx<assoc; lineIndx++) 
+        for(UINT32 lineIndx=0; lineIndx<assoc; lineIndx++) 
+        {
+            if( myRepl[setIndex][lineIndx].cacheLineAge < currcacheLineAge ) 
             {
-                if( myRepl[setIndex][lineIndx].cacheLineAge < currcacheLineAge)
-                {
-                    myRepl[setIndex][lineIndx].cacheLineAge++;
-                }
+                myRepl[setIndex][lineIndx].cacheLineAge++;
             }
-
-            // Set the MRU stack position of new line to be zero
-            myRepl[ setIndex ][ updateWayID ].cacheLineAge = 0;
-        }else{
-            //if cache hit, we put the hitted cacheline into a MRU position in protected region
-            for(UINT32 lineIndx=0; lineIndx<assoc; lineIndx++)
-            {
-                if( myRepl[setIndex][lineIndx].cacheLineAge < currcacheLineAge &&
-                    myRepl[setIndex][lineIndx].cacheLineAge >= segBoundary)
-                {
-                    myRepl[setIndex][lineIndx].cacheLineAge++;
-                }
-            }
-
-            myRepl[ setIndex ][ updateWayID ].cacheLineAge = segBoundary;
         }
+
+        // Set the MRU stack position of new line to be zero
+        myRepl[ setIndex ][ updateWayID ].cacheLineAge = 0;
     }else{
         if(cacheHit){ 
             myRepl[ setIndex ][ updateWayID ].used = true;
@@ -381,15 +366,19 @@ void CACHE_REPLACEMENT_STATE::probMissRate(bool cacheHit){
     }
   
     //check if we want to switch on every SWITCH_MARGIN access 
-    //we switch if the miss rate is more than SWITCH_MARGIN*10 %
     
+    //prob.access >= SWITCH_MARGIN 
+    //Meaning we have reached probe period, 1 probe period = SWITCH_MARGIN accesses 
+    //SWITCH_MARGIN is constant defined in .h file
     if(prob.access >= SWITCH_MARGIN){ 
+        //we switch if the misses are more than 1/SWITCH_THRES of the accesses %
         if((prob.miss * SWITCH_THRES) > prob.access){
             if(currPolicy == LRU){
                 currPolicy = CLOCK;
             }else if(currPolicy == CLOCK){
                 currPolicy = LRU;
             }
+        //if current switch can keep the miss rate low, we give it a point
         }else{
             if(currPolicy == LRU){
                 score.lru++;
@@ -398,13 +387,15 @@ void CACHE_REPLACEMENT_STATE::probMissRate(bool cacheHit){
             }
         }
         
-        //reset prob for next cycle (next SWITCH_MARGIN access)
+        //reset prob for next cycle (next SWITCH_MARGIN accesses)
         prob.access = 0;
         prob.miss = 0;
-
+        
+        //if lru AND clock have finished this round of competition, reset their score
+        //for next round
         if((score.lru+score.clock)>SCORE_CHECK_ROUND){
-            score.lru = 0;
-            score.clock = 1;
+            score.lru = LRU_INIT_SCORE;
+            score.clock = CLOCK_INIT_SCORE;
         }
     }
 }

@@ -21,9 +21,11 @@
 #include "utils.h"
 #include "crc_cache_defs.h"
 
-#define SWITCH_THRES 3
+#define SWITCH_THRES 4
 #define SWITCH_MARGIN 100
 #define SCORE_CHECK_ROUND 5
+#define LRU_INIT_SCORE 0
+#define CLOCK_INIT_SCORE 0
 // Replacement Policies Supported
 typedef enum 
 {
@@ -70,18 +72,17 @@ class CACHE_REPLACEMENT_STATE
     UINT32 numsets;
     UINT32 assoc;
     UINT32 replPolicy;
-    UINT32 segBoundary; //boundary for half of the cache in SLRU
-     
+    
     LINE_REPLACEMENT_STATE   **repl;
 
     COUNTER mytimer;  // tracks # of references to the cache
 
     // CONTESTANTS:  Add extra state for cache here
-    LINE_REPLACEMENT_STATE  **myRepl;
-    MISS_PROPOTION  prob;
-    SCORE_BOARD     score;
-    SWITCHABLE_POLICY    currPolicy;
-    UINT8   *hand;
+    LINE_REPLACEMENT_STATE  **myRepl;   //separate my Replacement policy from default
+    MISS_PROPOTION  prob;   //a probe for miss proportion
+    SCORE_BOARD     score;  //a score board for the CLOCK vs LRU
+    SWITCHABLE_POLICY    currPolicy;    //indicate current policy
+    UINT8   *hand;  //a hand for CLOCK, only use 4 bit per set (16-way assoc)
   public:
 
     // The constructor CAN NOT be changed
