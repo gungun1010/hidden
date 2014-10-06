@@ -21,6 +21,8 @@
 #include "utils.h"
 #include "crc_cache_defs.h"
 
+#define UINT8       unsigned char
+
 #define SWITCH_THRES 4
 #define SWITCH_MARGIN 100
 #define SCORE_CHECK_ROUND 5

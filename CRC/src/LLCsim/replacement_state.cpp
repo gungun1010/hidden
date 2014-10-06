@@ -206,6 +206,13 @@ INT32 CACHE_REPLACEMENT_STATE::Get_LRU_Victim( UINT32 setIndex )
     return lruWay;
 }
 
+////////////////////////////////////////////////////////////////////////////////
+//                                                                            //
+// this function implements the victim finding algorithm for LRU              //
+// Though most part of the function is the same as LRU, I duplicate           //
+// the function here to separate out my LRU victim function and original      //
+//                                                                            //
+////////////////////////////////////////////////////////////////////////////////
 void CACHE_REPLACEMENT_STATE::Get_MyLRU_Victim(UINT32 setIndex,INT32 &line)
 {
     // Get pointer to replacement state of current set
@@ -222,6 +229,11 @@ void CACHE_REPLACEMENT_STATE::Get_MyLRU_Victim(UINT32 setIndex,INT32 &line)
 }
 
 
+////////////////////////////////////////////////////////////////////////////////
+//                                                                            //
+// this function implements the victim finding algorithm for CLOCK            //
+//                                                                            //
+////////////////////////////////////////////////////////////////////////////////
 void CACHE_REPLACEMENT_STATE::Get_MyCLOCK_Victim(UINT32 setIndex,INT32 &line)
 {
     
@@ -262,26 +274,31 @@ INT32 CACHE_REPLACEMENT_STATE::Get_Random_Victim( UINT32 setIndex )
 
 ////////////////////////////////////////////////////////////////////////////////
 //                                                                            //
-// This function finds the SWITCH victim in the cache set by returning the       //
-// cache block at the top  of the LRU stack. Top of LRU stack is '0'          //
-// while bottom of LRU stack is 'assoc-1'                                     //
+// This function finds the SWITCH victim                                      //
 //                                                                            //
 ////////////////////////////////////////////////////////////////////////////////
 INT32 CACHE_REPLACEMENT_STATE::Get_SWITCH_Victim( UINT32 setIndex )
 {
-    INT32   line=0;
-
-    //default policy is MRU, and default to not switch to CLOCK
+    INT32   line=0;//line is passed by reference in the functions below
+    
     if(currPolicy == LRU){
         if(score.lru >= score.clock){
+            //if both the switch and scoreboard are at the LRU side, go with LRU
+            //victim algorithm
             Get_MyLRU_Victim(setIndex,line);
         }else{
+            //if there is disagreement between switch and scoreboard
+            //go with scoreboard's decision
             Get_MyCLOCK_Victim(setIndex,line);
         }        
     }else if(currPolicy == CLOCK){// Famous CLOCK policy
         if(score.clock >= score.lru){
+            //if both the switch and scoreboard are at the CLOCK side, go with CLOCK
+            //victim algorithm
             Get_MyCLOCK_Victim(setIndex,line);
         }else{
+            //if there is disagreement between switch and scoreboard
+            //go with scoreboard's decision
             Get_MyLRU_Victim(setIndex,line);
         }
     }
@@ -351,7 +368,7 @@ void CACHE_REPLACEMENT_STATE::UpdateSWITCH( UINT32 setIndex, INT32 updateWayID, 
 
 ////////////////////////////////////////////////////////////////////////////////
 //                                                                            //
-// This functon switchs the policy when miss rate >30%                        //
+// This functon switchs the policy when misses hit threshold                  //
 // return true to switch policy, falsue to not switch                         //
 //                                                                            //
 ////////////////////////////////////////////////////////////////////////////////
