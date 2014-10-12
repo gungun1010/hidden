@@ -26,7 +26,7 @@ class PREDICTOR{
   bool    GetPrediction(UINT32 PC);  
   void    UpdatePredictor(UINT32 PC, bool resolveDir, bool predDir, UINT32 branchTarget);
   void    TrackOtherInst(UINT32 PC, OpType opType, UINT32 branchTarget);
-
+  UINT32    concatenate(UINT32 pc, UINT32 gbh);
   // Contestants can define their own functions below
 
 };

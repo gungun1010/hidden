@@ -25,7 +25,7 @@ using namespace std;
 #define INT32       int
 #define UINT64      unsigned long long
 #define COUNTER     unsigned long long
-
+#define UINT8       unsigned char
 
 #define NOT_TAKEN 0
 #define TAKEN 1
