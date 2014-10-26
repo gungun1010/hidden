@@ -9,7 +9,7 @@ num_parallel_jobs=4
 
 # The following line will launch sims for all workloads when you run ./doit.sh (comment it if you dont want it to) 
 
-#./runall.pl -f $num_parallel_jobs -d "../results/MYBRANCHPREDICTOR.32KB"
+./runall.pl -f $num_parallel_jobs -d "../results/MYBRANCHPREDICTOR.32KB"
 
 
 
