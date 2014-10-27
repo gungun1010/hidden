@@ -3,8 +3,8 @@
 
 #include "utils.h"
 #include "tracer.h"
-
-
+#include <math.h>
+#include <string.h>
 /////////////////////////////////////////////////////////////
 /////////////////////////////////////////////////////////////
 
@@ -14,12 +14,16 @@ class PREDICTOR{
 
  private:
   UINT32  gbh;           // global history register, global bracnch history
-  UINT32  **pht;          // pattern history table, BP table entry
+  UINT32  **basePht;          // pattern history table, BP table entry
   UINT32  pcReserveBits; // history length
   UINT32  corBits;       // correlation bits
   UINT32  numCor;           // number of correlated tables
-  UINT32  numPhtEntries; // entries in pht 
+  UINT32  numPhtEntries; // entries in basePht 
   bool    *tableSelSR;      //table selector shift register
+  UINT32     *tageComponents;  //length of he array is the number of componnents, value of the element is the length of each component
+  UINT32     **tag;
+  char        **counter;    //counter for tage component entry, 3 bits used
+  char        **useful;     //useful bit for the entry of each tage component, 1 bit used
 
  public:
 
@@ -29,8 +33,9 @@ class PREDICTOR{
   bool    GetPrediction(UINT32 PC);  
   void    UpdatePredictor(UINT32 PC, bool resolveDir, bool predDir, UINT32 branchTarget);
   void    TrackOtherInst(UINT32 PC, OpType opType, UINT32 branchTarget);
-  UINT32    concatenate(UINT32 pc, UINT32 gbh);
   UINT32    correlation();
+  bool      basePred(UINT32 PC);
+  void      tagePred(UINT32 PC, UINT32 indx);
   // Contestants can define their own functions below
 
 };
