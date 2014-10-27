@@ -1,11 +1,11 @@
 #include "predictor.h"
 
 
-#define PHT_CTR_MAX  0x11
-#define PHT_CTR_INIT 0x10
+#define PHT_CTR_MAX  3
+#define PHT_CTR_INIT 0
 
-#define PC_RESERVE_BITS   15
-#define CORRELATION_BITS  2
+#define PC_RESERVE_BITS   17
+#define CORRELATION_BITS  1
 /////////////// STORAGE BUDGET JUSTIFICATION ////////////////
 // Total storage budget: 32KB + 17 bits
 // Total PHT (pattern history table) entries: 2^17 
