@@ -1,11 +1,12 @@
 #include "predictor.h"
 
 
-#define PHT_CTR_MAX  0x11
-#define PHT_CTR_INIT 0x10
+#define PHT_CTR_MAX  3
+#define PHT_CTR_INIT 0
 
-#define PC_RESERVE_BITS   15
-#define CORRELATION_BITS  2
+#define PC_RESERVE_BITS   17
+#define CORRELATION_BITS  1
+
 #define TAGE_COMPONENTS   4
 #define GEO_SERIES_BEGIN  1
 #define GEO_SERIES_RATIO  2
@@ -184,6 +185,8 @@ void PREDICTOR::tagePred(UINT32 PC, UINT32 indx){
     for(UINT32 i=0;i<TAG_LENGTH;i++){
         if(tag == tag[indx][i]){
             //provide prediction
+            //FIXME use 2 bit saturation counter for prediction
+            //FIXME figure out what useful bit does 
         }
     }
     //create a tag
