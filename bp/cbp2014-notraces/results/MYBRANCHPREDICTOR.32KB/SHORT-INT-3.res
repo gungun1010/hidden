@@ -1,5 +1,7 @@
-0
-4
-8
-12
-20
+.............................
+
+NUM_INSTRUCTIONS     	 :   29499978
+NUM_CONDITIONAL_BR   	 :    3771697
+NUM_MISPREDICTIONS   	 :     371356
+MISPRED_PER_1K_INST  	 :     12.588
+
