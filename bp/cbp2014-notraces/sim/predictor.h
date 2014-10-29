@@ -20,14 +20,15 @@ class PREDICTOR{
   UINT32  numCor;           // number of correlated tables
   UINT32  numPhtEntries; // entries in basePht 
   bool    *tableSelSR;      //table selector shift register
-  UINT32     *tageEntryBits;  //the length of he array is the number of componnents, value of the element is the number of bits of  each table entry
+
+  //tage variables
+  UINT32     *componentLen;  //the length of he array is the number of componnents, value of the element is the number of bits of  each table entry
   UINT32     **tag;
   char        **counter;    //counter for tage component entry, 3 bits used
-  char        **useful;     //useful bit for the entry of each tage component, 1 bit used
-  UINT32      currComponent;
-  UINT32      currTageEntry;
+  bool        **useful;     //useful bit for the entry of each tage component, 1 bit used
+  UINT32      provider;
   bool        altPred;
-  bool        realPred;
+  char        usefulRst;
  public:
 
   // The interface to the four functions below CAN NOT be changed
