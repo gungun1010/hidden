@@ -173,11 +173,11 @@ bool PREDICTOR::basePred(UINT32 PC){
 
 UINT32 PREDICTOR::tagePred(UINT32 PC, UINT32 indx){
     //total number of tags in the tage component is 2^componentLen
-    UINT32 myTag= (PC^gbh) % componentLen[indx];
+    UINT32 myTag= (PC) % componentLen[indx];
     //prediction default to not found 
     UINT32 ret = 0xdeadbeef;
     //tag is the same length of index, taken from history
-    UINT32 tageIndx = (gbh) % componentLen[indx]; 
+    UINT32 tageIndx = (PC^gbh) % componentLen[indx]; 
     //hash the PC with global branch history with the defined tag length 
         
     //found matching tag
@@ -230,7 +230,7 @@ void PREDICTOR::updateBase(UINT32 PC, bool resolveDir){
 void PREDICTOR::updateTage(UINT32 PC, bool resolveDir, bool predDir){
    
    UINT32 tagePhtCounter;
-   UINT32 tageIndx = (gbh) % componentLen[provider]; 
+   UINT32 tageIndx = (PC^gbh) % componentLen[provider]; 
    
     //FIXME, this may not be correct
     //useful = 0 meaning not useful
@@ -268,7 +268,7 @@ void PREDICTOR::updateTage(UINT32 PC, bool resolveDir, bool predDir){
    //new entry is allocated only on misprediction
    if(resolveDir != predDir){//misprediction
         //tag is 5-bit PC XOR global history
-        tag[provider][tageIndx] = (PC^gbh) % componentLen[provider];
+        tag[provider][tageIndx] = (PC) % componentLen[provider];
 
         //init prediction for the entry
         counter[provider][tageIndx] = PHT_CTR_INIT;
