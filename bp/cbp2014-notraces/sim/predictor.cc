@@ -8,9 +8,10 @@
 #define CORRELATION_BITS  1
 
 #define TAGE_COMPONENTS   3
-#define GEO_SERIES_BEGIN  1
-#define GEO_SERIES_RATIO  2
-#define FIRST_TAGE_LENGTH 5
+#define FIRST_TAGE_LENGTH 10
+#define USEFUL_RESET    256000
+#define UPPER 0
+#define LOWER 1
 /////////////// STORAGE BUDGET JUSTIFICATION ////////////////
 // Total storage budget: 32KB + 17 bits
 // Total PHT (pattern history table) entries: 2^17 
@@ -32,6 +33,7 @@ PREDICTOR::PREDICTOR(void){
   provider    = 0xdeadbeef;//default to a dead value for current tage component
   altPred          = NOT_TAKEN; //base prediction default to not taken
   usefulRst        = 0; //useful reset starts at 0
+  usefulAlt        = UPPER;
   ////////////////////////////////////////////////////////////////
   //                Initialize base pht 
   ////////////////////////////////////////////////////////////////
@@ -64,7 +66,7 @@ PREDICTOR::PREDICTOR(void){
   componentLen = new UINT32 [TAGE_COMPONENTS];
   tag = new UINT32* [TAGE_COMPONENTS];
   counter = new char* [TAGE_COMPONENTS];
-  useful = new bool* [TAGE_COMPONENTS];
+  useful = new char* [TAGE_COMPONENTS];
   
   for(UINT32 jj=0; jj< TAGE_COMPONENTS; jj++){
       //initlaize the size of tage components in geometric series fashion
@@ -78,7 +80,7 @@ PREDICTOR::PREDICTOR(void){
       counter[jj] = new char [1<<componentLen[jj]];
       memset(counter[jj],PHT_CTR_INIT,1<<componentLen[jj]);
       
-      useful[jj] = new bool [1<<componentLen[jj]];
+      useful[jj] = new char [1<<componentLen[jj]];
       memset(useful[jj],0,1<<componentLen[jj]);
   }
 }
@@ -124,6 +126,15 @@ void  PREDICTOR::UpdatePredictor(UINT32 PC, bool resolveDir, bool predDir, UINT3
     }else{
         updateTage(PC, resolveDir, predDir);
     }
+   
+   //update global history
+    gbh = (gbh << 1);
+
+    if(resolveDir == TAKEN){
+        gbh++; 
+    }
+
+    usefulRst++;
 }
 
 /////////////////////////////////////////////////////////////
@@ -176,21 +187,25 @@ UINT32 PREDICTOR::tagePred(UINT32 PC, UINT32 indx){
     UINT32 myTag= (PC^gbh) % componentLen[indx];
     //prediction default to not found 
     UINT32 ret = 0xdeadbeef;
-    //tag is the same length of index, taken from history
-    UINT32 tageIndx = (gbh) % componentLen[indx]; 
+    UINT32 numEntries = 1 << componentLen[indx];
+    
     //hash the PC with global branch history with the defined tag length 
         
     //found matching tag
     //break away from the loop
-    if(myTag == tag[indx][tageIndx]){
-        //provide prediction
-        //found tag, save index of found tag
+    for(UINT32 i=0; i<numEntries; i++){
+        if(myTag == tag[indx][i]){
+            //provide prediction
+            //found tag, save index of found tag
 
-        //saturation counter in action
-        if(counter[indx][tageIndx] == PHT_CTR_MAX){
-            ret = TAKEN;
-        }else if(counter[indx][tageIndx] == PHT_CTR_INIT){
-            ret = NOT_TAKEN;
+            //saturation counter in action
+            if(counter[indx][i] == PHT_CTR_MAX){
+                ret = TAKEN;
+            }else if(counter[indx][i] == PHT_CTR_INIT){
+                ret = NOT_TAKEN;
+            }
+            tageIndx=i;
+            break;
         }
     }
 
@@ -209,13 +224,6 @@ void PREDICTOR::updateBase(UINT32 PC, bool resolveDir){
         basePht[tableNum][basePhtIndex] = SatDecrement(basePhtCounter);
     }
 
-    // update the gbh
-    // gbh stores last 32 BP result (resolveDir), though we only use 17 bits of it
-    gbh = (gbh << 1);
-
-    if(resolveDir == TAKEN){
-        gbh++; 
-    }
     
     //update correlation bit
     if(corBits > 1){
@@ -230,54 +238,45 @@ void PREDICTOR::updateBase(UINT32 PC, bool resolveDir){
 void PREDICTOR::updateTage(UINT32 PC, bool resolveDir, bool predDir){
    
    UINT32 tagePhtCounter;
-   UINT32 tageIndx = (gbh) % componentLen[provider]; 
    
-    //FIXME, this may not be correct
-    //useful = 0 meaning not useful
-    if(!(useful[provider][tageIndx]) ){
-        //since the entry is not useful, decrease reset counter
-        if(usefulRst != 0){
-            usefulRst--;
-        }
-    }else{
-        //the current entry is useful, reset timer is ticking~~~
-        usefulRst++;
-    }
-
    //update useful bit 
    //set useful bit when prediction is correct and alternative prediction is incorrect
    //we have to find a matching in order for this if() to be true
-   if(resolveDir == predDir && resolveDir != altPred){
+   if(predDir != altPred){
+
+       if(predDir == resolveDir){
+           //set useful bit
+           if(useful[provider][tageIndx] != PHT_CTR_MAX) 
+                useful[provider][tageIndx]++;
+       }else{
+           if(useful[provider][tageIndx] != PHT_CTR_INIT)
+               useful[provider][tageIndx]--;
+       }
        
-       //set useful bit 
-       useful[provider][tageIndx] = 1;
 
        //reset all useful bits when it saturates
-       if(usefulRst >= 255){
+       UINT32 numEntries;
+       if(usefulRst >= USEFUL_RESET){
            //reset useful bits
            for(UINT32 i=0; i<TAGE_COMPONENTS; i++){
-               memset(useful[i],0,1<<componentLen[i]);
+               numEntries = 1<<componentLen[i];
+               for(UINT32 j=0; j < numEntries; j++){
+                   if(usefulAlt == UPPER){
+                        useful[i][j]= useful[i][j] & 1; //reset upper useful bit
+                        usefulAlt = LOWER;
+                   }else{
+                       useful[i][j]= useful[i][j] & 2; //reset lower useful bit
+                       usefulAlt = UPPER;
+                   }
+                 }
            }
+
+           //reset branch counter
            usefulRst = 0;
        }
    }
-
-
-   //add new entry
-   //get number of tags in this tage components
-   //new entry is allocated only on misprediction
-   if(resolveDir != predDir){//misprediction
-        //tag is 5-bit PC XOR global history
-        tag[provider][tageIndx] = (PC^gbh) % componentLen[provider];
-
-        //init prediction for the entry
-        counter[provider][tageIndx] = PHT_CTR_INIT;
-
-        //init to not useful
-        useful[provider][tageIndx] = 0;
-   }     
-
-    //update counter when we can find matching tag
+   
+    //update counter when we can find matching tag (provider)
     //if we dont have a matching tag, we dont do anything here
     tagePhtCounter = counter[provider][tageIndx];
 
@@ -288,11 +287,32 @@ void PREDICTOR::updateTage(UINT32 PC, bool resolveDir, bool predDir){
         counter[provider][tageIndx] = SatDecrement(tagePhtCounter);
     }
 
-   //update global history
-    gbh = (gbh << 1);
 
-    if(resolveDir == TAKEN){
-        gbh++; 
-    }
-    
+   //add new entry
+   //get number of tags in this tage components
+   //new entry is allocated only on misprediction
+   UINT32 numEntries;
+   if(resolveDir != predDir){//misprediction
+       if(provider < TAGE_COMPONENTS-1){
+           numEntries = 1<<componentLen[provider+1];
+           //allocate on provider+1 compoent
+           for(UINT32 i=0; i< numEntries; i++){
+                if(useful[provider+1][i] == 0){
+                    counter[provider+1][i]=1;
+                    tag[provider+1][i] = (PC^gbh) % componentLen[provider+1];
+                    break;
+                }
+           }
+       }else{
+           numEntries = 1<<componentLen[provider];
+           //allocate on provider compoent
+           for(UINT32 i=0; i< numEntries; i++){
+                if(useful[provider][i] == 0){
+                    counter[provider][i]=1;
+                    tag[provider][i] = (PC^gbh) % componentLen[provider];
+                    break;
+                }
+           }
+       }
+   }
 }
