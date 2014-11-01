@@ -4,11 +4,12 @@
 #define PHT_CTR_MAX  3
 #define PHT_CTR_INIT 0
 
-#define PC_RESERVE_BITS   16
+#define PC_RESERVE_BITS   15
 #define CORRELATION_BITS  1
 
 #define TAGE_COMPONENTS   3
-#define FIRST_TAGE_LENGTH 10
+#define FIRST_TAGE_LENGTH 14
+#define TAG_LENGTH  13
 #define USEFUL_RESET    256000
 #define UPPER 0
 #define LOWER 1
@@ -184,28 +185,23 @@ bool PREDICTOR::basePred(UINT32 PC){
 
 UINT32 PREDICTOR::tagePred(UINT32 PC, UINT32 indx){
     //total number of tags in the tage component is 2^componentLen
-    UINT32 myTag= (PC^gbh) % componentLen[indx];
+    UINT32 tageIndx= (PC^gbh) % componentLen[indx];
+    UINT32 myTag = (PC ^ (gbh << 2)) % TAG_LENGTH;  
     //prediction default to not found 
     UINT32 ret = 0xdeadbeef;
-    UINT32 numEntries = 1 << componentLen[indx];
-    
     //hash the PC with global branch history with the defined tag length 
         
     //found matching tag
     //break away from the loop
-    for(UINT32 i=0; i<numEntries; i++){
-        if(myTag == tag[indx][i]){
-            //provide prediction
-            //found tag, save index of found tag
+    if(myTag == tag[indx][tageIndx]){
+        //provide prediction
+        //found tag, save index of found tag
 
-            //saturation counter in action
-            if(counter[indx][i] == PHT_CTR_MAX){
-                ret = TAKEN;
-            }else if(counter[indx][i] == PHT_CTR_INIT){
-                ret = NOT_TAKEN;
-            }
-            tageIndx=i;
-            break;
+        //saturation counter in action
+        if(counter[indx][tageIndx] == PHT_CTR_MAX){
+            ret = TAKEN;
+        }else if(counter[indx][tageIndx] == PHT_CTR_INIT){
+            ret = NOT_TAKEN;
         }
     }
 
@@ -238,6 +234,9 @@ void PREDICTOR::updateBase(UINT32 PC, bool resolveDir){
 void PREDICTOR::updateTage(UINT32 PC, bool resolveDir, bool predDir){
    
    UINT32 tagePhtCounter;
+   UINT32 tageIndx= (PC^gbh) % componentLen[provider];
+   UINT32 myTag = (PC ^ (gbh << 2)) % TAG_LENGTH;  
+   UINT32 numEntries;
    
    //update useful bit 
    //set useful bit when prediction is correct and alternative prediction is incorrect
@@ -255,7 +254,6 @@ void PREDICTOR::updateTage(UINT32 PC, bool resolveDir, bool predDir){
        
 
        //reset all useful bits when it saturates
-       UINT32 numEntries;
        if(usefulRst >= USEFUL_RESET){
            //reset useful bits
            for(UINT32 i=0; i<TAGE_COMPONENTS; i++){
@@ -268,7 +266,7 @@ void PREDICTOR::updateTage(UINT32 PC, bool resolveDir, bool predDir){
                        useful[i][j]= useful[i][j] & 2; //reset lower useful bit
                        usefulAlt = UPPER;
                    }
-                 }
+               }
            }
 
            //reset branch counter
@@ -288,10 +286,10 @@ void PREDICTOR::updateTage(UINT32 PC, bool resolveDir, bool predDir){
     }
 
 
+   //FIXME: how ?
    //add new entry
    //get number of tags in this tage components
    //new entry is allocated only on misprediction
-   UINT32 numEntries;
    if(resolveDir != predDir){//misprediction
        if(provider < TAGE_COMPONENTS-1){
            numEntries = 1<<componentLen[provider+1];
@@ -299,7 +297,7 @@ void PREDICTOR::updateTage(UINT32 PC, bool resolveDir, bool predDir){
            for(UINT32 i=0; i< numEntries; i++){
                 if(useful[provider+1][i] == 0){
                     counter[provider+1][i]=1;
-                    tag[provider+1][i] = (PC^gbh) % componentLen[provider+1];
+                    tag[provider+1][i] = myTag;
                     break;
                 }
            }
@@ -309,7 +307,7 @@ void PREDICTOR::updateTage(UINT32 PC, bool resolveDir, bool predDir){
            for(UINT32 i=0; i< numEntries; i++){
                 if(useful[provider][i] == 0){
                     counter[provider][i]=1;
-                    tag[provider][i] = (PC^gbh) % componentLen[provider];
+                    tag[provider][i] = myTag;
                     break;
                 }
            }
