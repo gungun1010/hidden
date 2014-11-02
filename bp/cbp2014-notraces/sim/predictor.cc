@@ -4,13 +4,13 @@
 #define PHT_CTR_MAX  3
 #define PHT_CTR_INIT 0
 
-#define PC_RESERVE_BITS   16
+#define PC_RESERVE_BITS   15
 #define CORRELATION_BITS  1
 
 #define TAGE_COMPONENTS   3
-#define FIRST_TAGE_LENGTH 10
-#define TAG_LENGTH  12
-#define USEFUL_RESET    256000
+#define FIRST_TAGE_LENGTH 5
+#define TAG_LENGTH  7
+#define USEFUL_RESET    262144
 #define UPPER 0
 #define LOWER 1
 /////////////// STORAGE BUDGET JUSTIFICATION ////////////////
@@ -186,7 +186,7 @@ bool PREDICTOR::basePred(UINT32 PC){
 UINT32 PREDICTOR::tagePred(UINT32 PC, UINT32 indx){
     //total number of tags in the tage component is 2^componentLen
     UINT32 tageIndx= (PC^gbh) % componentLen[indx];
-    UINT32 myTag = (PC ^ (gbh << 2)) % TAG_LENGTH;  
+    UINT32 myTag = (PC) % TAG_LENGTH;  
     //prediction default to not found 
     UINT32 ret = 0xdeadbeef;
     //hash the PC with global branch history with the defined tag length 
@@ -238,16 +238,16 @@ void PREDICTOR::updateTage(UINT32 PC, bool resolveDir, bool predDir){
    
    UINT32 tagePhtCounter;
    UINT32 tageIndx= (PC^gbh) % componentLen[provider];
-   UINT32 myTag = (PC ^ (gbh << 2)) % TAG_LENGTH;  
+   UINT32 myTag = (PC) % TAG_LENGTH;  
    UINT32 numEntries;
    
    //update useful bit 
    //set useful bit when prediction is correct and alternative prediction is incorrect
    //we have to find a matching in order for this if() to be true
    if(predDir != altPred){
-
+        
+       //update useful bit
        if(predDir == resolveDir){
-           //set useful bit
            if(useful[provider][tageIndx] != PHT_CTR_MAX) 
                 useful[provider][tageIndx]++;
        }else{
@@ -289,28 +289,30 @@ void PREDICTOR::updateTage(UINT32 PC, bool resolveDir, bool predDir){
     }
 
 
-   //FIXME: how ?
    //add new entry
    //get number of tags in this tage components
    //new entry is allocated only on misprediction
    if(resolveDir != predDir){//misprediction
        if(provider < TAGE_COMPONENTS-1){
-
            //allocate on provider+1 compoent
             tageIndx= (PC^gbh) % componentLen[provider+1];
 
+            //check with the useful bit
             if(useful[provider+1][tageIndx] <= PHT_CTR_MAX/2){
                 counter[provider+1][tageIndx]=PHT_CTR_INIT;
                 tag[provider+1][tageIndx] = myTag;
+                useful[provider+1][tageIndx] = PHT_CTR_INIT;
             }
            
        }else{
-           
-           tageIndx= (PC^gbh) % componentLen[provider];
            //allocate on provider compoent
+           tageIndx= (PC^gbh) % componentLen[provider];
+
+           //check with the useful bit
             if(useful[provider][tageIndx] <= PHT_CTR_MAX/2){
                 counter[provider][tageIndx]=PHT_CTR_INIT;
                 tag[provider][tageIndx] = myTag;
+                useful[provider][tageIndx] = PHT_CTR_INIT;
             }
        }
    }
