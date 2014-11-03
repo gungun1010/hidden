@@ -4,19 +4,16 @@
 #define PHT_CTR_MAX  3
 #define PHT_CTR_INIT 0
 
-#define PC_RESERVE_BITS   15
+#define PC_RESERVE_BITS   16
 #define CORRELATION_BITS  1
 
-#define TAGE_COMPONENTS   3
-#define FIRST_TAGE_LENGTH 5
-#define TAG_LENGTH  7
-#define USEFUL_RESET    262144
-#define UPPER 0
-#define LOWER 1
+#define BTB_SIZE       50
+#define MIS_PRED_THRES 3
+#define BLACKLIST_SIZE 400
 /////////////// STORAGE BUDGET JUSTIFICATION ////////////////
 // Total storage budget: 32KB + 17 bits
 // Total PHT (pattern history table) entries: 2^17 
-// Total PHT size = 2^17 * 2 bits per saturationPrediction = 2^18 bits = 32KB
+// Total PHT size = 2^17 * 2 bits/counter = 2^18 bits = 32KB
 // GHR size: 17 bits
 // Total Size = PHT size + GHR size
 /////////////////////////////////////////////////////////////
@@ -31,17 +28,9 @@ PREDICTOR::PREDICTOR(void){
   gbh              = 0;//global branch history
   numPhtEntries    = (1<< pcReserveBits);//left shift 1 for 17 bits, this is equal to 2^17
   numCor           = (1<< corBits);
-  provider    = 0xdeadbeef;//default to a dead value for current tage component
-  altPred          = NOT_TAKEN; //base prediction default to not taken
-  usefulRst        = 0; //useful reset starts at 0
-  usefulAlt        = UPPER;
-  ////////////////////////////////////////////////////////////////
-  //                Initialize base pht 
-  ////////////////////////////////////////////////////////////////
-  
   
   //allocate total of 2^17 UINT32 of memory, takes 17 bits from PC
-  basePht = new UINT32* [numCor];
+  pht = new UINT32* [numCor];
   
   //allocate memory for talbe selector shift register
   tableSelSR = new bool[corBits];
@@ -51,38 +40,29 @@ PREDICTOR::PREDICTOR(void){
   }
   
   for(UINT32 ii=0; ii< numCor; ii++){
-      basePht[ii] = new UINT32 [numPhtEntries];
+      pht[ii] = new UINT32 [numPhtEntries];
   }
 
   for(UINT32 j=0; j< numCor; j++){
       for(UINT32 k=0; k< numPhtEntries; k++){
-        //init to be 0x10, TAKEN
-        basePht[j][k]=PHT_CTR_INIT; 
+        pht[j][k]=PHT_CTR_INIT; 
       }
   }
-
-  ////////////////////////////////////////////////////////////////
-  //                Initialize tage 
-  ////////////////////////////////////////////////////////////////
-  componentLen = new UINT32 [TAGE_COMPONENTS];
-  tag = new UINT32* [TAGE_COMPONENTS];
-  counter = new char* [TAGE_COMPONENTS];
-  useful = new char* [TAGE_COMPONENTS];
   
-  for(UINT32 jj=0; jj< TAGE_COMPONENTS; jj++){
-      //initlaize the size of tage components in geometric series fashion
-      //componentLen[jj] =(UINT32) pow(GEO_SERIES_RATIO,jj) * GEO_SERIES_BEGIN;
-      componentLen[jj] = FIRST_TAGE_LENGTH + jj;
+  //init BTB
+  btbEntry = new UINT32[BTB_SIZE];
+  btbVal = new bool [BTB_SIZE];
+  btbAge = new UINT32 [BTB_SIZE];
+  btbMisPred = new UINT32 [BTB_SIZE];
+  matching = false;
+  currIndx = 0;
+  loc =0;
 
-      //initialize the tags to all 0 for each component
-      tag[jj] = new UINT32 [1<<componentLen[jj]];
-      memset(tag[jj],0,1<<componentLen[jj]);
-
-      counter[jj] = new char [1<<componentLen[jj]];
-      memset(counter[jj],PHT_CTR_INIT,1<<componentLen[jj]);
-      
-      useful[jj] = new char [1<<componentLen[jj]];
-      memset(useful[jj],0,1<<componentLen[jj]);
+  for(UINT32 indx=0; indx<BTB_SIZE; indx++){
+    btbEntry[indx] = 0;
+    btbVal[indx] = NOT_TAKEN;
+    btbAge[indx] = 0; 
+    btbMisPred[indx] =0;
   }
 }
 
@@ -90,31 +70,37 @@ PREDICTOR::PREDICTOR(void){
 /////////////////////////////////////////////////////////////
 
 bool   PREDICTOR::GetPrediction(UINT32 PC){
-    
-    bool ret;
-    UINT32 found;
-    
-    //get base prediction from a 2-bit saturation predictor with coorelation
-    ret = basePred(PC);
- 
-    //record current base prediction to alternative prediction
-    altPred = ret;
-    
-    //default to a dead value for current tage component
-    provider = 0xdeadbeef;
-    
-    //loop thru tage components
-    for(UINT32 indx=0; indx<TAGE_COMPONENTS; indx++){
-        //try to get a tage prediction from shortest tage component to longest tage component
-        found = tagePred(PC, indx);
-        
-        //if we have a tage match, the prediction is the longest hitted tage prediction
-        if(found != 0xdeadbeef ) {
-            ret = found;
-            provider = indx;
-        }
-    }
-    return ret; 
+
+  //PC^gbh PC xor global branch history, is because of the GShare semantic
+  //% numPhtEntries (2^17), we are taking 17 bits of the PC as our entry
+  //we are taking lowest 17 bits of the PC to construct our table entry
+  //UINT32 phtIndex   = (PC^gbh) % (numPhtEntries);
+  UINT32 phtIndex   ;
+  phtIndex   = (PC^gbh) % (numPhtEntries);
+  UINT32 tableNum = correlation();
+  UINT32 phtCounter = pht[tableNum][phtIndex];
+  
+  matching = false; 
+  //find PC in the btb
+  //cout<<endl;
+  for(UINT32 indx=0; indx<BTB_SIZE; indx++){
+      if(PC == btbEntry[indx]){
+          //cout<<"found matching"<<endl;
+          matching = true;
+          currIndx = indx;
+          return btbVal[indx];
+      }
+  }
+  
+  //cout<<"no matching in btb"<<endl;
+  //stick with correlated-GShare if PC is not in btb 
+  //saturation counter in action
+  if(phtCounter > PHT_CTR_MAX/2){
+    return TAKEN; 
+  }else{
+    return NOT_TAKEN; 
+  }
+  
 }
 
 
@@ -122,20 +108,121 @@ bool   PREDICTOR::GetPrediction(UINT32 PC){
 /////////////////////////////////////////////////////////////
 
 void  PREDICTOR::UpdatePredictor(UINT32 PC, bool resolveDir, bool predDir, UINT32 branchTarget){
-    if(provider == 0xdeadbeef){
-        updateBase(PC, resolveDir, predDir);
-    }else{
-        updateTage(PC, resolveDir, predDir);
-    }
-   
-   //update global history
-    gbh = (gbh << 1);
 
-    if(resolveDir == TAKEN){
-        gbh++; 
-    }
+  UINT32 phtIndex   = (PC^gbh) % (numPhtEntries);
+  UINT32 tableNum   = correlation();
+  UINT32 phtCounter = pht[tableNum][phtIndex];
+  UINT32 btbIndx;
 
-    usefulRst++;
+  //update BTB
+  if(!matching){
+       //try find an empty slot in BTB
+      for(btbIndx=0; btbIndx<BTB_SIZE; btbIndx++){
+          if(btbEntry[btbIndx] == 0){//found empty slot
+                //if the current PC is in the blacklist, we don't add it to the btb
+                if(std::find(blackList.begin(), blackList.end(), PC)!=blackList.end()){
+                    break;
+                }else{
+                    //insert BTB entry, prediction, and age
+                    btbEntry[btbIndx]=PC;
+                    btbVal[btbIndx]=resolveDir;
+                    btbAge[btbIndx]=0;
+                    break;
+                }
+          }
+      }
+
+      //if empty slot not found
+      //find oldest slot
+      if(btbIndx >= BTB_SIZE){
+          for(UINT32 i=0; i<BTB_SIZE; i++){
+              if(btbAge[i] >= BTB_SIZE-1){
+                //if the current PC is in the blacklist, we don't add it to the btb
+                if(std::find(blackList.begin(), blackList.end(), PC)!=blackList.end()){
+                    break;
+                }else{
+                    //insert BTB entry, prediction, and age
+                    btbEntry[i]=PC;
+                    btbVal[i]=resolveDir;
+                    btbAge[i]=0;
+                    break;
+                }
+              }
+          }
+      }
+
+  }else{//if there is a matching
+
+      if(resolveDir != predDir){
+           //cout<<"mis predict on matching"<<endl;
+           btbMisPred[currIndx]++;
+           btbVal[currIndx]=resolveDir;
+
+           //flush the entry if the outcome is too volatile
+           if(btbMisPred[currIndx]>=MIS_PRED_THRES){
+                //add to black list
+                //keep in mind that the blacklist has limited size
+                if(blackList.size()<BLACKLIST_SIZE){
+                    blackList.push_back(btbEntry[currIndx]);
+                }else{
+                    //we rewind blacklist index when it is full
+                    if(loc>=BLACKLIST_SIZE){
+                        loc =0;
+                    }
+                    
+                    //loc is 0 to begin with after push_back completes
+                    blackList[loc]=btbEntry[currIndx];
+                    loc++;
+                }
+
+                //flush
+                btbEntry[currIndx]=0;
+                btbVal[currIndx]=NOT_TAKEN;
+                btbAge[currIndx]=0;
+                btbMisPred[currIndx]=0;
+           }
+      }else{
+          //reset age on matching btb entry
+          btbAge[currIndx]=0;
+      }
+  }
+
+  //update btb entry's age
+  for(btbIndx=0; btbIndx<BTB_SIZE; btbIndx++){
+    //  cout<<btbIndx<<" "<<btbAge[btbIndx]<<endl;
+      if(btbAge[btbIndx]<BTB_SIZE-1){
+          btbAge[btbIndx]++;
+      }
+  }
+
+  //we only update pht when the correlated GShare is in effect
+  if(!matching){
+      //update saturation counter
+      if(resolveDir == TAKEN){
+        pht[tableNum][phtIndex] = SatIncrement(phtCounter, PHT_CTR_MAX);
+      }else{
+        pht[tableNum][phtIndex] = SatDecrement(phtCounter);
+      }
+  }
+  
+  // update the gbh, always update global branch history
+  // gbh stores last 32 BP result (resolveDir), though we only use 17 bits of it
+  gbh = (gbh << 1);
+
+  if(resolveDir == TAKEN){
+    gbh++; 
+  }
+
+  if(!matching){
+      //update correlation bit
+      if(corBits > 1){
+          for(UINT32 i=0; i<corBits-1; i++){
+              tableSelSR[i+1] = tableSelSR[i];
+          }
+      }
+      
+      tableSelSR[0] = resolveDir;
+  }
 }
 
 /////////////////////////////////////////////////////////////
@@ -150,8 +237,22 @@ void    PREDICTOR::TrackOtherInst(UINT32 PC, OpType opType, UINT32 branchTarget)
 
   return;
 }
-/////////////////////////////////////////////////////////////
-/////////////////////////////////////////////////////////////
+
+//this function is unused
+UINT32 PREDICTOR::concatenate(UINT32 a, UINT32 b){
+    UINT32  result;
+    UINT8   seg1, seg2, seg3, seg4;
+    
+    seg4 = b & 0xff;
+    seg3 = a & 0xff;
+    seg2 = (b>>8) & 0xff;
+    seg1 = (a>>8) & 0xff;
+
+    result = seg1<<24 | seg2<<16 | seg3<<8 | seg4;
+    //result = seg1<<24 | seg3<<16 | seg2<<8 | seg4;
+    return result;
+}
+
 UINT32 PREDICTOR::correlation(){
     UINT32 ret=0;
     
@@ -162,158 +263,3 @@ UINT32 PREDICTOR::correlation(){
     return ret;
 }
 
-bool PREDICTOR::basePred(UINT32 PC){
-    //PC^gbh PC xor global branch history, is because of the GShare semantic
-    //% numPhtEntries (2^17), we are taking 17 bits of the PC as our entry
-    //we are taking lowest 17 bits of the PC to construct our table entry
-    //UINT32 basePhtIndex   = (PC^gbh) % (numPhtEntries);
-    UINT32 basePhtIndex;
-    basePhtIndex = (PC^gbh) % (numPhtEntries);
-    UINT32 tableNum = correlation();
-    UINT32 basePhtCounter = basePht[tableNum][basePhtIndex];
-    bool ret; 
-
-    //saturation counter in action
-    if(basePhtCounter > PHT_CTR_MAX/2){
-        ret = TAKEN; 
-    }else{
-        ret = NOT_TAKEN; 
-    }
-
-    return ret;
-}
-
-UINT32 PREDICTOR::tagePred(UINT32 PC, UINT32 indx){
-    //total number of tags in the tage component is 2^componentLen
-    UINT32 tageIndx= (PC^gbh) % componentLen[indx];
-    UINT32 myTag = (PC) % TAG_LENGTH;  
-    //prediction default to not found 
-    UINT32 ret = 0xdeadbeef;
-    //hash the PC with global branch history with the defined tag length 
-        
-    //found matching tag
-    //break away from the loop
-    if(myTag == tag[indx][tageIndx]){
-        //provide prediction
-        //found tag, save index of found tag
-
-        //saturation counter in action
-        if(counter[indx][tageIndx] == PHT_CTR_MAX){
-            ret = TAKEN;
-        }else if(counter[indx][tageIndx] == PHT_CTR_INIT){
-            ret = NOT_TAKEN;
-        }
-    }
-
-    return ret;
-}
-
-void PREDICTOR::updateBase(UINT32 PC, bool resolveDir, bool predDir){
-
-    UINT32 basePhtIndex   = (PC^gbh) % (numPhtEntries);
-    UINT32 tableNum   = correlation();
-    UINT32 basePhtCounter = basePht[tableNum][basePhtIndex];
-
-    // update the PHT, based on actual outcome, resolveDir
-    // using saturation counter
-    if(resolveDir == TAKEN){
-        basePht[tableNum][basePhtIndex] = SatIncrement(basePhtCounter, PHT_CTR_MAX);
-    }else{
-        basePht[tableNum][basePhtIndex] = SatDecrement(basePhtCounter);
-    }
-
-    
-    //update correlation bit
-    if(corBits > 1){
-        for(UINT32 i=0; i<corBits-1; i++){
-            tableSelSR[i+1] = tableSelSR[i];
-        }
-    }
-
-    tableSelSR[0] = resolveDir;
-   
-}
-
-void PREDICTOR::updateTage(UINT32 PC, bool resolveDir, bool predDir){
-   
-   UINT32 tagePhtCounter;
-   UINT32 tageIndx= (PC^gbh) % componentLen[provider];
-   UINT32 myTag = (PC) % TAG_LENGTH;  
-   UINT32 numEntries;
-   
-   //update useful bit 
-   //set useful bit when prediction is correct and alternative prediction is incorrect
-   //we have to find a matching in order for this if() to be true
-   if(predDir != altPred){
-        
-       //update useful bit
-       if(predDir == resolveDir){
-           if(useful[provider][tageIndx] != PHT_CTR_MAX) 
-                useful[provider][tageIndx]++;
-       }else{
-           if(useful[provider][tageIndx] != PHT_CTR_INIT)
-               useful[provider][tageIndx]--;
-       }
-       
-
-       //reset all useful bits when it saturates
-       if(usefulRst >= USEFUL_RESET){
-           //reset useful bits
-           for(UINT32 i=0; i<TAGE_COMPONENTS; i++){
-               numEntries = 1<<componentLen[i];
-               for(UINT32 j=0; j < numEntries; j++){
-                   if(usefulAlt == UPPER){
-                        useful[i][j]= useful[i][j] & 1; //reset upper useful bit
-                        usefulAlt = LOWER;
-                   }else{
-                       useful[i][j]= useful[i][j] & 2; //reset lower useful bit
-                       usefulAlt = UPPER;
-                   }
-               }
-           }
-
-           //reset branch counter
-           usefulRst = 0;
-       }
-   }
-   
-    //update counter when we can find matching tag (provider)
-    //if we dont have a matching tag, we dont do anything here
-    tagePhtCounter = counter[provider][tageIndx];
-
-    //update in a saturation counter fashion
-    if(resolveDir == TAKEN){
-        counter[provider][tageIndx] = SatIncrement(tagePhtCounter, PHT_CTR_MAX);
-    }else{
-        counter[provider][tageIndx] = SatDecrement(tagePhtCounter);
-    }
-
-
-   //add new entry
-   //get number of tags in this tage components
-   //new entry is allocated only on misprediction
-   if(resolveDir != predDir){//misprediction
-       if(provider < TAGE_COMPONENTS-1){
-           //allocate on provider+1 compoent
-            tageIndx= (PC^gbh) % componentLen[provider+1];
-
-            //check with the useful bit
-            if(useful[provider+1][tageIndx] <= PHT_CTR_MAX/2){
-                counter[provider+1][tageIndx]=PHT_CTR_INIT;
-                tag[provider+1][tageIndx] = myTag;
-                useful[provider+1][tageIndx] = PHT_CTR_INIT;
-            }
-           
-       }else{
-           //allocate on provider compoent
-           tageIndx= (PC^gbh) % componentLen[provider];
-
-           //check with the useful bit
-            if(useful[provider][tageIndx] <= PHT_CTR_MAX/2){
-                counter[provider][tageIndx]=PHT_CTR_INIT;
-                tag[provider][tageIndx] = myTag;
-                useful[provider][tageIndx] = PHT_CTR_INIT;
-            }
-       }
-   }
-}
