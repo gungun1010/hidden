@@ -32,7 +32,7 @@ class PREDICTOR{
   UINT32  currIndx;         //matching index of the entry, 9 bits
   UINT32  *btbMisPred;      //miss prediction when matching, 2 bits per entry
   vector<UINT32> blackList; //black list to hold highly volatile branch, 32 bit
-  UINT32  loc;
+  UINT32  loc;              //blackList index for times when blackList is full
 
  public:
 

@@ -7,9 +7,9 @@
 #define PC_RESERVE_BITS   16
 #define CORRELATION_BITS  1
 
-#define BTB_SIZE       50
+#define BTB_SIZE       64
 #define MIS_PRED_THRES 3
-#define BLACKLIST_SIZE 400
+#define BLACKLIST_SIZE 512
 /////////////// STORAGE BUDGET JUSTIFICATION ////////////////
 // Total storage budget: 32KB + 17 bits
 // Total PHT (pattern history table) entries: 2^17 
