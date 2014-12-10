@@ -4,18 +4,21 @@
 #define PHT_CTR_MAX  3
 #define PHT_CTR_INIT 0
 
-#define PC_RESERVE_BITS   16
+#define PC_RESERVE_BITS   15
 #define CORRELATION_BITS  1
 
-#define BTB_SIZE       64
+#define BTB_SIZE 2048      
 #define MIS_PRED_THRES 3
-#define BLACKLIST_SIZE 512
+#define BLACKLIST_SIZE 1250
 /////////////// STORAGE BUDGET JUSTIFICATION ////////////////
 // Total storage budget: 32KB + 17 bits
-// Total PHT (pattern history table) entries: 2^17 
-// Total PHT size = 2^17 * 2 bits/counter = 2^18 bits = 32KB
+// Total PHT (pattern history table) entries: 2^15
+// Total Correlation bit: 2^0 
+// Total PHT size = 2* 2^15 * 2 bits/counter = 2^17 bits = 16KB
 // GHR size: 17 bits
-// Total Size = PHT size + GHR size
+// Total BTB_SIZE = 2048* (32+1+10+2)/8 = 11KB
+// Total Black List size = 1250*32 = 6KB
+// Total Size = PHT size + GHR size + BTB size + Black List size
 /////////////////////////////////////////////////////////////
 
 /////////////////////////////////////////////////////////////
@@ -127,6 +130,7 @@ void  PREDICTOR::UpdatePredictor(UINT32 PC, bool resolveDir, bool predDir, UINT3
                     btbEntry[btbIndx]=PC;
                     btbVal[btbIndx]=resolveDir;
                     btbAge[btbIndx]=0;
+                    btbMisPred[btbIndx]=0;
                     break;
                 }
           }
@@ -145,6 +149,7 @@ void  PREDICTOR::UpdatePredictor(UINT32 PC, bool resolveDir, bool predDir, UINT3
                     btbEntry[i]=PC;
                     btbVal[i]=resolveDir;
                     btbAge[i]=0;
+                    btbMisPred[i]=0;
                     break;
                 }
               }
