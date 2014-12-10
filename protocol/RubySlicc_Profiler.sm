@@ -27,41 +27,38 @@
  * OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  */
 
-/*
- * $Id$
- *
- */
+// Profiler function
 
-// MemoryRequestType used in MemoryMsg
+void profileStore(NodeID node, bool needCLB);
+void profileCacheCLBsize(int size, int numStaleI);
+void profileMemoryCLBsize(int size, int numStaleI);
 
-enumeration(MemoryRequestType, desc="...") {
+// used by 2level exclusive cache protocols
+void profile_miss(RubyRequest msg);
 
-  // Southbound request: from directory to memory cache
-  // or directory to memory or memory cache to memory
-  MEMORY_READ,     desc="Read request to memory";
-  MEMORY_WB,       desc="Write back data to memory";
+// used by non-fast path protocols
+void profile_L1Cache_miss(RubyRequest msg, NodeID l1cacheID);
 
-  // response from memory to directory
-  // (These are currently unused!)
-  MEMORY_DATA, desc="Data read from memory";
-  MEMORY_ACK,  desc="Write to memory acknowledgement";
-}
+// used by CMP protocols
+void profile_request(std::string L1CacheStateStr, std::string L2CacheStateStr,
+    std::string directoryStateStr, std::string requestTypeStr);
+void profileMessageReordering(bool wasReordered);
+void profileMessageReorderingByNetwork(int vnet, bool wasReordered);
+void profile_token_retry(Address addr, AccessType type, int count);
+void profile_persistent_prediction(Address addr, AccessType type);
+void profile_filter_action(int act);
+void profile_multicast_retry(Address addr, int count);
+void profile_outstanding_request(int outstanding);
+void profile_outstanding_persistent_request(int outstanding);
+// void profile_overlapping_persistent_request(int overlapping);
+void profile_average_latency_estimate(int latency);
 
+// profile the total message delay of a message across a virtual network
+void profileMsgDelay(int virtualNetwork, int delayCycles);
 
-// Message to and from Memory Control
+// used by transactional-memory protocols
+void profile_transaction(int numStores);
+void profile_trans_wb();
+void profileOverflow(Address addr, MachineID mach);
 
-structure(MemoryMsg, desc="...", interface="Message") {
-  Address Addr,              desc="Physical address for this request";
-  MemoryRequestType Type,       desc="Type of memory request (MEMORY_READ or MEMORY_WB)";
-  MachineID Sender,             desc="What component sent the data";
-  MachineID OriginalRequestorMachId, desc="What component originally requested";
-  DataBlock DataBlk,            desc="Data to writeback";
-  MessageSizeType MessageSize,  desc="size category of the message";
-  // Not all fields used by all protocols:
-  PrefetchBit Prefetch,         desc="Is this a prefetch request";
-  bool ReadX,                   desc="Exclusive";
-  int Acks,                     desc="How many acks to expect";
-
-
-}
 

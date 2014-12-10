@@ -1,6 +1,6 @@
+
 /*
- * Copyright (c) 1999-2012 Mark D. Hill and David A. Wood
- * Copyright (c) 2011 Advanced Micro Devices, Inc.
+ * Copyright (c) 1999-2005 Mark D. Hill and David A. Wood
  * All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
@@ -27,24 +27,24 @@
  * OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  */
 
-// Declarations of external types that are common to all protocols
+/*
+ * $Id$
+ *
+ */
+
+// defines
 external_type(int, primitive="yes", default="0");
 external_type(bool, primitive="yes", default="false");
 external_type(std::string, primitive="yes");
-external_type(uint32_t, primitive="yes");
 external_type(uint64, primitive="yes");
-external_type(PacketPtr, primitive="yes");
-external_type(Packet, primitive="yes");
+external_type(Time, primitive="yes", default="0");
 external_type(Address);
-external_type(Cycles, primitive="yes", default="Cycles(0)");
-
 structure(DataBlock, external = "yes", desc="..."){
   void clear();
   void copyPartial(DataBlock, int, int);
 }
 
-bool testAndRead(Address addr, DataBlock datablk, Packet *pkt);
-bool testAndWrite(Address addr, DataBlock datablk, Packet *pkt);
+// Declarations of external types that are common to all protocols
 
 // AccessPermission
 // The following five states define the access permission of all memory blocks.
@@ -138,38 +138,59 @@ enumeration(RubyRequestType, desc="...", default="RubyRequestType_NULL") {
 }
 
 enumeration(SequencerRequestType, desc="...", default="SequencerRequestType_NULL") {
-  Default,    desc="Replace this with access_types passed to the DMA Ruby object";
   LD,          desc="Load";
   ST,          desc="Store";
   NULL,        desc="Invalid request type";
 }
 
-enumeration(CacheRequestType, desc="...", default="CacheRequestType_NULL") {
-  DataArrayRead,    desc="Read access to the cache's data array";
-  DataArrayWrite,   desc="Write access to the cache's data array";
-  TagArrayRead,     desc="Read access to the cache's tag array";
-  TagArrayWrite,    desc="Write access to the cache's tag array";
+enumeration(GenericRequestType, desc="...", default="GenericRequestType_NULL") {
+  GETS,        desc="gets request";
+  GET_INSTR,   desc="get instr request";
+  GETX,        desc="getx request";
+  UPGRADE,     desc="upgrade request";
+  DOWNGRADE,   desc="downgrade request";
+  INV,         desc="invalidate request";
+  INV_S,       desc="invalidate shared copy request";
+  PUTS,        desc="puts request";
+  PUTO,        desc="puto request";
+  PUTX,        desc="putx request";
+  L2_PF,       desc="L2 prefetch";
+  LD,          desc="Load";
+  ST,          desc="Store";
+  ATOMIC,      desc="Atomic Load/Store";
+  IFETCH,      desc="Instruction fetch";
+  IO,          desc="I/O";
+  NACK,        desc="Nack";
+  REPLACEMENT, desc="Replacement";
+  WB_ACK,      desc="WriteBack ack";
+  EXE_ACK,     desc="Execlusive ack";
+  COMMIT,      desc="Commit version";
+  LD_XACT,     desc="Transactional Load";
+  LDX_XACT,     desc="Transactional Load-Intend-Modify";
+  ST_XACT,     desc="Transactional Store";
+  BEGIN_XACT,  desc="Begin Transaction";
+  COMMIT_XACT, desc="Commit Transaction";
+  ABORT_XACT,  desc="Abort Transaction";	
+  DMA_READ,    desc="DMA READ";
+  DMA_WRITE,   desc="DMA WRITE";
+  NULL,        desc="null request type";
 }
 
-enumeration(CacheResourceType, desc="...", default="CacheResourceType_NULL") {
-  DataArray,    desc="Access to the cache's data array";
-  TagArray,     desc="Access to the cache's tag array";
-}
-
-enumeration(DirectoryRequestType, desc="...", default="DirectoryRequestType_NULL") {
-  Default,    desc="Replace this with access_types passed to the Directory Ruby object";
-}
-
-enumeration(DMASequencerRequestType, desc="...", default="DMASequencerRequestType_NULL") {
-  Default,    desc="Replace this with access_types passed to the DMA Ruby object";
-}
-
-enumeration(MemoryControlRequestType, desc="...", default="MemoryControlRequestType_NULL") {
-  Default,    desc="Replace this with access_types passed to the DMA Ruby object";
+enumeration(GenericMachineType, desc="...", default="GenericMachineType_NULL") {
+  L1Cache,     desc="L1 Cache Mach";
+  L2Cache,     desc="L2 Cache Mach";
+  L3Cache,     desc="L3 Cache Mach";
+  Directory,   desc="Directory Mach";
+  DMA,         desc="DMA Mach";
+  Collector,   desc="Collector Mach";
+  L1Cache_wCC, desc="L1 Cache Mach with Cache Coherence (used for miss latency profile)";
+  L2Cache_wCC, desc="L1 Cache Mach with Cache Coherence (used for miss latency profile)";
+  NULL,        desc="null mach type";
 }
 
 // MessageSizeType
-enumeration(MessageSizeType, desc="...") {
+enumeration(MessageSizeType, default="MessageSizeType_Undefined", desc="...") {
+  Undefined,  desc="Undefined";
   Control,    desc="Control Message";
   Data,       desc="Data Message";
   Request_Control, desc="Request";
@@ -219,14 +240,6 @@ structure(SequencerMsg, desc="...", interface="Message") {
   DataBlock DataBlk,         desc="Data";
   int Len,                   desc="size in bytes of access";
   PrefetchBit Prefetch,      desc="Is this a prefetch request";
-
-  bool functionalRead(Packet *pkt) {
-    return testAndRead(PhysicalAddress, DataBlk, pkt);
-  }
-
-  bool functionalWrite(Packet *pkt) {
-    return testAndWrite(PhysicalAddress, DataBlk, pkt);
-  }
 }
 
 // MaskPredictorType
@@ -267,6 +280,55 @@ enumeration(MaskPredictorTraining, "MaskPredictorTraining_Undefined", desc="..."
   Implicit, desc="Implicit";
   Explicit, desc="Explicit";
   Both, desc="Both";
+}
+
+// Network Topologies
+enumeration(TopologyType, desc="...") {
+  CROSSBAR, desc="One node per chip, single switch crossbar";
+  HIERARCHICAL_SWITCH, desc="One node per chip, totally ordered hierarchical tree switched network";
+  TORUS_2D, desc="One node per chip, 2D torus";
+  PT_TO_PT, desc="One node per chip, Point to Point Network";
+  FILE_SPECIFIED, desc="described by the file NETWORK_FILE";
+}
+
+// DNUCA AllocationStrategy
+enumeration(AllocationStrategy, desc="...") {
+  InMiddle, desc="";
+  InInvCorners, desc="";
+  InSharedSides, desc="";
+  StaticDist, desc="";
+  RandomBank, desc="";
+  FrequencyBank, desc="";
+  FrequencyBlock, desc="";
+  LRUBlock, desc="";
+}
+
+// DNUCA SearchMechanism
+enumeration(SearchMechanism, desc="...") {
+  Perfect, desc="";
+  PartialTag, desc="";
+  BloomFilter, desc="";
+  Random, desc="";
+  None, desc="";
+}
+
+// DNUCA link type
+enumeration(LinkType, desc="...") {
+  RC_1500UM, desc="";
+  RC_2500UM, desc="";
+  TL_9000UM, desc="";
+  TL_11000UM, desc="";
+  TL_13000UM, desc="";
+  NO_ENERGY, desc="";
+  NULL, desc="";
+}
+
+// transient request type
+enumeration(TransientRequestType, desc="...", default="TransientRequestType_Undefined") {
+  Undefined, desc="";
+  OffChip, desc="";
+  OnChip, desc="";
+  LocalTransient, desc="";
 }
 
 // Request Status
