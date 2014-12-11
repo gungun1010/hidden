@@ -1,103 +1,78 @@
+/*
+ * Copyright (c) 2009-2012 Mark D. Hill and David A. Wood
+ * Copyright (c) 2010-2012 Advanced Micro Devices, Inc.
+ * All rights reserved.
+ *
+ * Redistribution and use in source and binary forms, with or without
+ * modification, are permitted provided that the following conditions are
+ * met: redistributions of source code must retain the above copyright
+ * notice, this list of conditions and the following disclaimer;
+ * redistributions in binary form must reproduce the above copyright
+ * notice, this list of conditions and the following disclaimer in the
+ * documentation and/or other materials provided with the distribution;
+ * neither the name of the copyright holders nor the names of its
+ * contributors may be used to endorse or promote products derived from
+ * this software without specific prior written permission.
+ *
+ * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
+ * "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
+ * LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR
+ * A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT
+ * OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL,
+ * SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT
+ * LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE,
+ * DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY
+ * THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
+ * (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
+ * OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+ */
 
-machine(L1Cache, "MSI L1 Cache")
+machine(L1Cache, "MI Example L1 Cache")
 : Sequencer * sequencer,
-  CacheMemory * cacheMemory, //ECE552: Unified L1 Instruction and Data Cache
-  int cache_response_latency = 12,
-  int issue_latency = 2,
-  bool send_evictions = true
+  CacheMemory * cacheMemory,
+  Cycles cache_response_latency = 12,
+  Cycles issue_latency = 2,
+  bool send_evictions
 {
 
   // NETWORK BUFFERS
-
-  //=============================================================
-  // To the Network
-  // ==============
-  //ECE552: <requestFromCache>: The local cache coherence controller gets requests from the L1 cache (e.g., on a miss) that it will propagate to the network via virtual network 2.
-  //ECE552: <responseFromCache>: The local cache coherence controller also propagates responses from its local cache to the network (e.g., a response to a forwarded GetS request from the directory)
-
   MessageBuffer requestFromCache, network="To", virtual_network="2", ordered="true", vnet_type="request";
   MessageBuffer responseFromCache, network="To", virtual_network="4", ordered="true", vnet_type="response";
-
-  //=============================================================
-  // From the Network
-  // ================
-  //ECE552:  <forwardToCache>: The local cache coherence controller receives forwarded requests from the directory.
-  //ECE552:  <responseToCache>: The local cache coherence controller also receives replies from the Network for requests it issues via virtual network 2.
 
   MessageBuffer forwardToCache, network="From", virtual_network="3", ordered="true", vnet_type="forward";
   MessageBuffer responseToCache, network="From", virtual_network="4", ordered="true", vnet_type="response";
 
-  //=============================================================
   // STATES
-  // ======
-  //
-  // ECE552: AccessPermissions specified in RubySlicc_Exports.sm
-  // ECE552: Valid Data:   Read_Only, Read_Write
-  // ECE552: Invalid Data: Invalid, NotPresent, Busy
-  //=============================================================
-
-  state_declaration(State, desc="Cache states", default="L1Cache_State_I") 
-  { //ECE552: All cache blocks are initially in Invalid State
-
-    //=====================
-    //ECE552: Stable States
-    //=====================
-
+  state_declaration(State, desc="Cache states") {
     I, AccessPermission:Invalid, desc="Not Present/Invalid";
-    /* ECE552: Complete this section here */
-    M, AccessPermission:Read_Write, desc="Modified state";
-	S, AccessPermission:Read_Only, desc="Read only state";
-    //========================
-    //ECE552: Transient States
-    //========================
+    II, AccessPermission:Busy, desc="Not Present/Invalid, issued PUT";
+    M, AccessPermission:Read_Write, desc="Modified";
+    MI, AccessPermission:Busy, desc="Modified, issued PUT";
+    MII, AccessPermission:Busy, desc="Modified, issued PUTX, received nack";
 
-    /* ECE552: Complete this section here */
-	IS_D,  AccessPermission:Busy, desc="Intermediate state: going from I to S and waiting for Data";
-	IM_AD, AccessPermission:Busy, desc="Intermediate state: going from I to M and waiting for Data and Acks";
-	IM_A,  AccessPermission:Busy, desc="Intermediate state: going from I to M and waiting for an Ack";
-	SM_AD, AccessPermission:Busy, desc="Intermediate state: going from S to M and waiting for Data and Acks";
-	SM_A,  AccessPermission:Busy, desc="Intermediate state: going from S to M and waiting for Acks";
-	MI_A,  AccessPermission:Busy, desc="Intermediate state: going from M to I and waiting for Acks";
-	SI_A,  AccessPermission:Busy, desc="Intermediate state: going from S to I and waiting for Acks";
-	II_A,  AccessPermission:Busy, desc="Intermediate state: going from I to I and waiting for Acks";
+    IS, AccessPermission:Busy, desc="Issued request for LOAD/IFETCH";
+    IM, AccessPermission:Busy, desc="Issued request for STORE/ATOMIC";
   }
 
-  // =============================================================================
   // EVENTS
-  // =============================================================================
   enumeration(Event, desc="Cache events") {
+    // From processor
 
-    //=================================================================================================================
-    //ECE552: L1 Events triggered from the local processor explicitly (i.e., memory request) or implicitly (replacement)
-    //=================================================================================================================
     Load,       desc="Load request from processor";
     Ifetch,     desc="Ifetch request from processor";
     Store,      desc="Store request from processor";
 
-    Replacement,  desc="Replace L1 cache block";
+    Data,       desc="Data from network";
+    Fwd_GETX,        desc="Forward from network";
 
-    //========================================================================
-    //ECE552: Requests forwarded to the L1 cache from the directory controller 
-    //========================================================================
-    Fwd_GetS,   desc="GetS forwarded from the directory"; //ECE552: original request was for read access
-    Fwd_GetM,   desc="GetM forwarded from the directory"; //ECE552: original request was for write access
-    Inv,        desc="Invalidate request from the directory";
+    Inv,        desc="Invalidate request from dir";
 
-    WB_Ack,     desc="Ack from the directory for a writeback";
-    
-    Inv_Ack,	 desc="Invalidate Ack";
-    Inv_Ack_all, desc="Last Invalidate Ack";
-
-    Data_from_Dir_No_Acks,       desc="Data from Directory, 0 Acks";
-    Data_from_Dir_Ack_Cnt,       desc="Data from Directory, along with Ack Count";
-    Data_from_Dir_Ack_Cnt_Last,  desc="Data from Directory, along with Ack Count, arrive after Inv_Ack";
-    Data_from_Owner,		 desc="Data from remote L1 (remote Owner)";
-
+    Replacement,  desc="Replace a block";
+    Writeback_Ack,   desc="Ack from the directory for a writeback";
+    Writeback_Nack,   desc="Nack from the directory for a writeback";
   }
 
-  // =============================================================================
   // STRUCTURE DEFINITIONS
-  // =============================================================================
 
   MessageBuffer mandatoryQueue, ordered="false";
 
@@ -109,11 +84,9 @@ machine(L1Cache, "MSI L1 Cache")
   }
 
   // TBE fields
-  // ECE552: Transient Block Entry acts like an MSHR (i.e., Miss Handling Register) keeping track of transitions that require an intermediate transient state
   structure(TBE, desc="...") {
-    State TBEState,               desc="Transient state";
-    DataBlock DataBlk,       	  desc="data for the block, required for concurrent writebacks";
-    int pendingAcks, default="0", desc="number of pending acks";
+    State TBEState,          desc="Transient state";
+    DataBlock DataBlk,       desc="data for the block, required for concurrent writebacks";
   }
 
   structure(TBETable, external="yes") {
@@ -124,28 +97,21 @@ machine(L1Cache, "MSI L1 Cache")
   }
 
 
-  // =============================================================================
   // STRUCTURES
-  // =============================================================================
-  TBETable TBEs, template_hack="<L1Cache_TBE>";
+  TBETable TBEs, template="<L1Cache_TBE>", constructor="m_number_of_TBEs";
 
-  // =============================================================================
   // PROTOTYPES
-  // =============================================================================
   void set_cache_entry(AbstractCacheEntry a);
   void unset_cache_entry();
   void set_tbe(TBE b);
   void unset_tbe();
+  void profileMsgDelay(int virtualNetworkType, Cycles b);
 
   Entry getCacheEntry(Address address), return_by_pointer="yes" {
     return static_cast(Entry, "pointer", cacheMemory.lookup(address));
   }
 
-  // =============================================================================
   // FUNCTIONS
-  // =============================================================================
-
-  //ECE552: This function maps a Ruby Incoming Memory Request Type to a SLICC Event
   Event mandatory_request_type_to_event(RubyRequestType type) {
    if (type == RubyRequestType:LD) {
       return Event:Load;
@@ -157,10 +123,6 @@ machine(L1Cache, "MSI L1 Cache")
       error("Invalid RubyRequestType");
     }
   }
-
-  //ECE552: This function returns the state for memory location <addr>. Note the priority:
-  // We first check the TBE (in case there are pending requests), then the cache, 
-  // and if nothing is present then we return an invalid state.
 
   State getState(TBE tbe, Entry cache_entry, Address addr) {
 
@@ -186,10 +148,6 @@ machine(L1Cache, "MSI L1 Cache")
     }
   }
 
-  // ECE552: Function L1Cache_State_to_permission() is autogenerated here: build/ALPHA/mem/protocol/L1Cache_State.cc
-  // ECE552: The permissions are the ones set in the States part earlier in this file.
-  // ECE552: Again note the order the different structures are checked: first the tbe and then the cache
-
   AccessPermission getAccessPermission(Address addr) {
     TBE tbe := TBEs[addr];
     if(is_valid(tbe)) {
@@ -211,116 +169,63 @@ machine(L1Cache, "MSI L1 Cache")
   }
 
   DataBlock getDataBlock(Address addr), return_by_ref="yes" {
+    TBE tbe := TBEs[addr];
+    if(is_valid(tbe)) {
+      return tbe.DataBlk;
+    }
+
     return getCacheEntry(addr).DataBlk;
   }
 
-  int getPendingAcks(TBE tbe) {
-    return tbe.pendingAcks;
-  }
-
-  GenericMachineType getNondirectHitMachType(MachineID sender) {
-    if (machineIDToMachineType(sender) == MachineType:L1Cache) {
-      //
-      // NOTE direct local hits should not call this
-      //
-      return GenericMachineType:L1Cache_wCC; 
-    } else {
-      return ConvertMachToGenericMach(machineIDToMachineType(sender));
-    }
-  }
-
-
-  // =============================================================================
   // NETWORK PORTS
-  // =============================================================================
 
-
-  //ECE552: Two output port that place messages onto the network (i.e., requests and reponses)
   out_port(requestNetwork_out, RequestMsg, requestFromCache);
   out_port(responseNetwork_out, ResponseMsg, responseFromCache);
- 
-  //ECE552: Process incoming request messages from the forwardToCache Network buffer. Trigger appropriate events based on the incoming CoherenceRequestType.
-  //ECE552: All CoherenceRequestType declarations are provided in MSI-msg.sm
 
   in_port(forwardRequestNetwork_in, RequestMsg, forwardToCache) {
     if (forwardRequestNetwork_in.isReady()) {
-      peek(forwardRequestNetwork_in, RequestMsg, block_on="Address") {
+      peek(forwardRequestNetwork_in, RequestMsg, block_on="Addr") {
 
         Entry cache_entry := getCacheEntry(in_msg.Addr);
         TBE tbe := TBEs[in_msg.Addr];
 
-        if (in_msg.Type == CoherenceRequestType:GETM) {
-          DPRINTF(RubySlicc, "L1 - forwardRequestNetwork_in port: GETM request for address %s\n", in_msg.Addr);
-          trigger(Event:Fwd_GetM, in_msg.Addr, cache_entry, tbe);
-        }
-	else if (in_msg.Type == CoherenceRequestType:GETS) {
-          DPRINTF(RubySlicc, "L1 - forwardRequestNetwork_in port: GETS request for address %s\n", in_msg.Addr);
-          trigger(Event:Fwd_GetS, in_msg.Addr, cache_entry, tbe);
-        }
-        else if (in_msg.Type == CoherenceRequestType:INV) {
-          DPRINTF(RubySlicc, "L1 - forwardRequestNetwork_in port: INV request for address %s\n", in_msg.Addr);
-          trigger(Event:Inv, in_msg.Addr, cache_entry, tbe);
+        if (in_msg.Type == CoherenceRequestType:GETX) {
+          trigger(Event:Fwd_GETX, in_msg.Addr, cache_entry, tbe);
         }
         else if (in_msg.Type == CoherenceRequestType:WB_ACK) {
-          DPRINTF(RubySlicc, "L1 - forwardRequestNetwork_in port: WB_ACK messsage for address %s\n", in_msg.Addr);
-          trigger(Event:WB_Ack, in_msg.Addr, cache_entry, tbe);
+          trigger(Event:Writeback_Ack, in_msg.Addr, cache_entry, tbe);
+        }
+        else if (in_msg.Type == CoherenceRequestType:WB_NACK) {
+          trigger(Event:Writeback_Nack, in_msg.Addr, cache_entry, tbe);
+        }
+        else if (in_msg.Type == CoherenceRequestType:INV) {
+          trigger(Event:Inv, in_msg.Addr, cache_entry, tbe);
         }
         else {
-          DPRINTF(RubySlicc, "Error! L1 - Unexpected Forwarded Message => address: %s, Request Type: %s\n", in_msg.Addr, in_msg.Type);
-          error("MSI_example L1 - Unexpected message in forwardToCache buffer");
+          error("Unexpected message");
         }
       }
     }
   }
-
-  //ECE552: Process incoming response messages from the responseToCache Network buffer. Trigger appropriate events based on the incoming CoherenceResponseType.
-  //ECE552: All CoherenceResponseType declarations are provided in MSI-msg.sm
 
   in_port(responseNetwork_in, ResponseMsg, responseToCache) {
     if (responseNetwork_in.isReady()) {
-      peek(responseNetwork_in, ResponseMsg, block_on="Address") {
+      peek(responseNetwork_in, ResponseMsg, block_on="Addr") {
 
         Entry cache_entry := getCacheEntry(in_msg.Addr);
         TBE tbe := TBEs[in_msg.Addr];
 
-        if (in_msg.Type == CoherenceResponseType:DATA_FROM_DIR) {
-	  if (in_msg.AckCount == 0) {
-            DPRINTF(RubySlicc, "L1 - responseNetwork_in port: DATA_FROM_DIR_NO_ACKS reply for address %s\n", in_msg.Addr);
-            trigger(Event:Data_from_Dir_No_Acks, in_msg.Addr, cache_entry, tbe);
-	  } else {
-            if ( (getPendingAcks(tbe) - in_msg.AckCount) == 0 ) {
-               DPRINTF(RubySlicc, "L1 - responseNetwork_in port: DATA_FROM_DIR_ACK_CNT reply for address %s - Data arrived after last Inv_Ack\n", in_msg.Addr);
-               trigger(Event:Data_from_Dir_Ack_Cnt_Last, in_msg.Addr, cache_entry, tbe);
-            } else {
-               DPRINTF(RubySlicc, "L1 - responseNetwork_in port: DATA_FROM_DIR_ACK_CNT reply for address %s\n", in_msg.Addr);
-               trigger(Event:Data_from_Dir_Ack_Cnt, in_msg.Addr, cache_entry, tbe);
-            }
-	  }
+        if (in_msg.Type == CoherenceResponseType:DATA) {
+          trigger(Event:Data, in_msg.Addr, cache_entry, tbe);
         }
-        else if (in_msg.Type == CoherenceResponseType:DATA_FROM_OWNER) {
-          DPRINTF(RubySlicc, "L1 - responseNetwork_in port: DATA_FROM_OWNER reply for address %s\n", in_msg.Addr);
-          trigger(Event:Data_from_Owner, in_msg.Addr, cache_entry, tbe);
-        } 
-	else if (in_msg.Type == CoherenceResponseType:ACK) {
-          if ( (getPendingAcks(tbe) - in_msg.AckCount) == 0 ) {
-            DPRINTF(RubySlicc, "L1 - responseNetwork_in port: INV_Ack_all for address %s\n", in_msg.Addr);
-            trigger(Event:Inv_Ack_all, in_msg.Addr, cache_entry, tbe);
-          } else {
-            DPRINTF(RubySlicc, "L1 - responseNetwork_in port: INV_Ack for address %s\n", in_msg.Addr);
-            trigger(Event:Inv_Ack, in_msg.Addr, cache_entry, tbe);
-          }
-	}
         else {
-          DPRINTF(RubySlicc, "Error! L1 - Unexpected Coherence Response Message => address: %s, Request Type: %s\n", in_msg.Addr, in_msg.Type);
-          error("MSI_example L1 - Unexpected message in reponseToCache buffer");
+          error("Unexpected message");
         }
       }
     }
   }
 
-  //Mandatory Queue
-  //ECE552: Process requests from the local processor.
-
+    // Mandatory Queue
   in_port(mandatoryQueue_in, RubyRequest, mandatoryQueue, desc="...") {
     if (mandatoryQueue_in.isReady()) {
       peek(mandatoryQueue_in, RubyRequest, block_on="LineAddress") {
@@ -328,14 +233,12 @@ machine(L1Cache, "MSI L1 Cache")
         Entry cache_entry := getCacheEntry(in_msg.LineAddress);
         if (is_invalid(cache_entry) &&
             cacheMemory.cacheAvail(in_msg.LineAddress) == false ) {
-          DPRINTF(RubySlicc, "L1 - mandatoryQueue_in request for address %s - Need to replace entry\n", in_msg.LineAddress);
           // make room for the block
           trigger(Event:Replacement, cacheMemory.cacheProbe(in_msg.LineAddress),
                   getCacheEntry(cacheMemory.cacheProbe(in_msg.LineAddress)),
                   TBEs[cacheMemory.cacheProbe(in_msg.LineAddress)]);
         }
         else {
-          DPRINTF(RubySlicc, "L1 - mandatoryQueue_in request of type %s for address %s - No replacement necessary\n", in_msg.Type, in_msg.LineAddress);
           trigger(mandatory_request_type_to_event(in_msg.Type), in_msg.LineAddress,
                   cache_entry, TBEs[in_msg.LineAddress]);
         }
@@ -345,33 +248,21 @@ machine(L1Cache, "MSI L1 Cache")
 
   // ACTIONS
 
-  action(as_issueGetS, "as", desc="Issue a request for read-only access") {
+  action(a_issueRequest, "a", desc="Issue a request") {
     enqueue(requestNetwork_out, RequestMsg, issue_latency) {
-      out_msg.Addr := address;
-      out_msg.Type := CoherenceRequestType:GETS;
+    out_msg.Addr := address;
+      out_msg.Type := CoherenceRequestType:GETX;
       out_msg.Requestor := machineID;
       out_msg.Destination.add(map_Address_to_Directory(address));
       out_msg.MessageSize := MessageSizeType:Control;
     }
   }
 
-  action(am_issueGetM, "am", desc="Issue a request for read-write access") {
-    enqueue(requestNetwork_out, RequestMsg, issue_latency) {
-      out_msg.Addr := address;
-      out_msg.Type := CoherenceRequestType:GETM;
-      out_msg.Requestor := machineID;
-      out_msg.Destination.add(map_Address_to_Directory(address));
-      out_msg.MessageSize := MessageSizeType:Control;
-    }
-  }
-
-  /* ECE552: Issue PUTS/PUTM requests, on local replacements to the directory */
-
-  action(bs_issuePUTS, "bs", desc="Issue a PUTS request") {
+  action(b_issuePUT, "b", desc="Issue a PUT request") {
     enqueue(requestNetwork_out, RequestMsg, issue_latency) {
       assert(is_valid(cache_entry));
       out_msg.Addr := address;
-      out_msg.Type := CoherenceRequestType:PUTS;
+      out_msg.Type := CoherenceRequestType:PUTX;
       out_msg.Requestor := machineID;
       out_msg.Destination.add(map_Address_to_Directory(address));
       out_msg.DataBlk := cache_entry.DataBlk;
@@ -379,25 +270,12 @@ machine(L1Cache, "MSI L1 Cache")
     }
   }
 
-  
-  action(bm_issuePUTM, "bm", desc="Issue a PUTM request") {
-    enqueue(requestNetwork_out, RequestMsg, issue_latency) {
-      assert(is_valid(cache_entry));
-      out_msg.Addr := address;
-      out_msg.Type := CoherenceRequestType:PUTM;
-      out_msg.Requestor := machineID;
-      out_msg.Destination.add(map_Address_to_Directory(address));
-      out_msg.DataBlk := cache_entry.DataBlk;
-      out_msg.MessageSize := MessageSizeType:Data;
-    }
-  }
-
-  action(e_sendDataFromCacheToRequestor, "e", desc="Send data from cache to requestor") {
+  action(e_sendData, "e", desc="Send data from cache to requestor") {
     peek(forwardRequestNetwork_in, RequestMsg) {
       enqueue(responseNetwork_out, ResponseMsg, cache_response_latency) {
         assert(is_valid(cache_entry));
         out_msg.Addr := address;
-        out_msg.Type := CoherenceResponseType:DATA_FROM_OWNER;
+        out_msg.Type := CoherenceResponseType:DATA;
         out_msg.Sender := machineID;
         out_msg.Destination.add(in_msg.Requestor);
         out_msg.DataBlk := cache_entry.DataBlk;
@@ -406,12 +284,12 @@ machine(L1Cache, "MSI L1 Cache")
     }
   }
 
-  action(ee_sendDataFromTBEToRequestor, "\e", desc="Send data from TBE to requestor") {
+  action(ee_sendDataFromTBE, "\e", desc="Send data from TBE to requestor") {
     peek(forwardRequestNetwork_in, RequestMsg) {
       enqueue(responseNetwork_out, ResponseMsg, cache_response_latency) {
         assert(is_valid(tbe));
         out_msg.Addr := address;
-        out_msg.Type := CoherenceResponseType:DATA_FROM_OWNER;
+        out_msg.Type := CoherenceResponseType:DATA;
         out_msg.Sender := machineID;
         out_msg.Destination.add(in_msg.Requestor);
         out_msg.DataBlk := tbe.DataBlk;
@@ -419,50 +297,9 @@ machine(L1Cache, "MSI L1 Cache")
       }
     }
   }
-
-  action(de_sendDataFromCacheToDir, "de", desc="Send data from cache to directory") { 
-     enqueue(responseNetwork_out, ResponseMsg, cache_response_latency) { 
-        assert(is_valid(cache_entry));
-        out_msg.Addr := address;
-        out_msg.Type := CoherenceResponseType:DATA;
-        out_msg.Sender := machineID;
-        out_msg.Destination.add(map_Address_to_Directory(address));
-        out_msg.DataBlk := cache_entry.DataBlk;
-        out_msg.MessageSize := MessageSizeType:Response_Data;
-     }
-  }
-
-  action(dee_sendDataFromTBEToDir, "d\e", desc="Send data from TBE to directory") {
-     enqueue(responseNetwork_out, ResponseMsg, cache_response_latency) {
-        assert(is_valid(tbe));
-        out_msg.Addr := address;
-        out_msg.Type := CoherenceResponseType:DATA;
-        out_msg.Sender := machineID;
-        out_msg.Destination.add(map_Address_to_Directory(address));
-        out_msg.DataBlk := tbe.DataBlk;
-	out_msg.MessageSize := MessageSizeType:Response_Data;
-     }
-  }
-
-  action(fi_sendInvAck, "fi", desc="send Invalidation Acknowledgement to Requestor") {
-    peek(forwardRequestNetwork_in, RequestMsg) {
-      enqueue(responseNetwork_out, ResponseMsg, cache_response_latency) {
-        out_msg.Addr := address;
-        out_msg.Type := CoherenceResponseType:ACK;
-        out_msg.Sender := machineID;
-        out_msg.Destination.add(in_msg.Requestor);
-        out_msg.MessageSize := MessageSizeType:Response_Control;
-        out_msg.AckCount := 1;
-      }
-    }
-  }
-
 
   action(i_allocateL1CacheBlock, "i", desc="Allocate a cache block") {
     if (is_valid(cache_entry)) {
-      if (getAccessPermission(address) != AccessPermission:Invalid) {
-	error("Should not get an allocate request for a block that has not Invalid permissions");
-      }
     } else {
       set_cache_entry(cacheMemory.allocate(address, new Entry));
     }
@@ -475,70 +312,56 @@ machine(L1Cache, "MSI L1 Cache")
     }
   }
 
-  //ECE552: remove request issued by the local core from the mandatory incoming queue
   action(m_popMandatoryQueue, "m", desc="Pop the mandatory request queue") {
     mandatoryQueue_in.dequeue();
   }
 
   action(n_popResponseQueue, "n", desc="Pop the response queue") {
-    profileMsgDelay(1, responseNetwork_in.dequeue_getDelayCycles());
+    profileMsgDelay(1, responseNetwork_in.dequeue());
   }
 
   action(o_popForwardedRequestQueue, "o", desc="Pop the forwarded request queue") {
-    profileMsgDelay(2, forwardRequestNetwork_in.dequeue_getDelayCycles());
+    profileMsgDelay(2, forwardRequestNetwork_in.dequeue());
   }
 
-  action(p_profileMiss, "p", desc="Profile cache miss") {
-    peek(mandatoryQueue_in, RubyRequest) {
-      cacheMemory.profileMiss(in_msg);
-    }
+  action(p_profileMiss, "pi", desc="Profile cache miss") {
+      ++cacheMemory.demand_misses;
   }
 
-  /* ECE552: Load completed. Data block was present with Read permissions in local cache */
+  action(p_profileHit, "ph", desc="Profile cache miss") {
+      ++cacheMemory.demand_hits;
+  }
+
   action(r_load_hit, "r", desc="Notify sequencer the load completed.") {
     assert(is_valid(cache_entry));
     DPRINTF(RubySlicc,"%s\n", cache_entry.DataBlk);
-    sequencer.readCallback(address, 
-                           GenericMachineType:L1Cache,
-                           cache_entry.DataBlk);
+    sequencer.readCallback(address, cache_entry.DataBlk, false);
   }
 
-  /* ECE552: Load completed. Block was not present in the local cache. 
-     Got data either from the the directory or from another remote L1 cache */
   action(rx_load_hit, "rx", desc="External load completed.") {
     peek(responseNetwork_in, ResponseMsg) {
       assert(is_valid(cache_entry));
       DPRINTF(RubySlicc,"%s\n", cache_entry.DataBlk);
-      sequencer.readCallback(address, 
-                             getNondirectHitMachType(in_msg.Sender),
-                             cache_entry.DataBlk);
+      sequencer.readCallback(address, cache_entry.DataBlk, true,
+                             machineIDToMachineType(in_msg.Sender));
     }
   }
 
-  /* ECE552: Store completed. Data block was present with Write permissions in local cache */
   action(s_store_hit, "s", desc="Notify sequencer that store completed.") {
     assert(is_valid(cache_entry));
     DPRINTF(RubySlicc,"%s\n", cache_entry.DataBlk);
-    sequencer.writeCallback(address, 
-                            GenericMachineType:L1Cache,
-                            cache_entry.DataBlk);
+    sequencer.writeCallback(address, cache_entry.DataBlk, false);
   }
 
-  /* ECE552: Store completed. Block was not present in the local cache or had Read_Only permissions. 
-     Got data either from the the directory or from the previous owner of that block (i.e., a remote L1 cache) */
   action(sx_store_hit, "sx", desc="External store completed.") {
     peek(responseNetwork_in, ResponseMsg) {
       assert(is_valid(cache_entry));
       DPRINTF(RubySlicc,"%s\n", cache_entry.DataBlk);
-      sequencer.writeCallback(address, 
-                              getNondirectHitMachType(in_msg.Sender),
-                              cache_entry.DataBlk);
+      sequencer.writeCallback(address, cache_entry.DataBlk, true,
+                              machineIDToMachineType(in_msg.Sender));
     }
   }
 
-  /* ECE552: Copy data block to the cache entry. Note that the is_valid(cache_entry)
-     does not check if the block is valid, but rather if it has been allocated (i.e., !NULL pointer)
-  */
   action(u_writeDataToCache, "u", desc="Write data to the cache") {
     peek(responseNetwork_in, ResponseMsg) {
       assert(is_valid(cache_entry));
@@ -546,520 +369,133 @@ machine(L1Cache, "MSI L1 Cache")
     }
   }
 
-  /* ECE552: Update the number of pending acknowledgements in the TBE entry.
-     When a TBE entry gets allocates pendingAcks is set to 0. The in_msg.AckCount
-     when received from the directory is a negative number (i.e., number of sharers)
-  */
-  action(q_updateAckCount, "q", desc="Update ack count") {
-    peek(responseNetwork_in, ResponseMsg) {
-      assert(is_valid(tbe));
-      tbe.pendingAcks := tbe.pendingAcks - in_msg.AckCount;
-      APPEND_TRANSITION_COMMENT(in_msg.AckCount);
-      APPEND_TRANSITION_COMMENT(" p: ");
-      APPEND_TRANSITION_COMMENT(tbe.pendingAcks);
-    }
-  }
-
-  /* ECE552: let the sequencer know that the cache replaced a block. */
   action(forward_eviction_to_cpu, "\cc", desc="sends eviction information to the processor") {
-    DPRINTF(RubySlicc, "forward_eviction to cpu; send_evictions is %s\n", send_evictions);
     if (send_evictions) {
       DPRINTF(RubySlicc, "Sending invalidation for %s to the CPU\n", address);
       sequencer.evictionCallback(address);
     }
   }
 
-  /* ECE552: allocate a TBE entry. The block is in a transient coherence state. */
   action(v_allocateTBE, "v", desc="Allocate TBE") {
     TBEs.allocate(address);
-    set_tbe(TBEs[address]); //Where is the body of set_tbe()?
- 			    // It's here (a) mem/slicc/ast/FuncCallExprAST.py
-                            //       and (b) mem/slicc/symbols/StateMachine.py
+    set_tbe(TBEs[address]);
   }
 
-  /* ECE552: Deallocate the TBE entry. The block is now in a stable coherence state and resides in the cache. */
   action(w_deallocateTBE, "w", desc="Deallocate TBE") {
     TBEs.deallocate(address);
     unset_tbe();
   }
 
-  /* ECE552: Copy Data block from cache entry to TBE. Remember a block in transient state
-     might still be asked to provide data to forwarded requests */
   action(x_copyDataFromCacheToTBE, "x", desc="Copy data from cache to TBE") {
     assert(is_valid(cache_entry));
     assert(is_valid(tbe));
     tbe.DataBlk := cache_entry.DataBlk;
   }
 
-  /* ECE552: Do nothing. Just stall. */
   action(z_stall, "z", desc="stall") {
     // do nothing
   }
 
-  // =============================================================================
   // TRANSITIONS
-  // =============================================================================
 
-  /* ECE552: Complete this section here */
-  
-  //Begin I state transitions
-  transition(I, {Load,Ifetch} , IS_D)
-  {
-    i_allocateL1CacheBlock;	//allocate a cache block
-	p_profileMiss;			//cache miss
-    v_allocateTBE;			//going into a transient state so we must allocate a Transient Block Entry
-	as_issueGetS;			//issue a GetS to dir
-	m_popMandatoryQueue;	//finish with request
-  }
-  
-  //        init state, action that occurs, state to transition to
-  transition(I, Store, IM_AD)
-  {
-    i_allocateL1CacheBlock;	//allocate a cache block
-	p_profileMiss;			//cache miss
-    v_allocateTBE;			//going into a transient state so we must allocate a Transient Block Entry
-	am_issueGetM;			//issue a GetM to dir
-	m_popMandatoryQueue;	//finish with request
-  }
-
-  //Begin IS_D state transitions
-  transition(IS_D, {Load, Ifetch})
-  {
-	z_stall;
-  }
-  
-  transition(IS_D, Store)
-  {
-	z_stall;
-  }
-
-  transition(IS_D, Replacement)
-  {
-	z_stall;
-  }
-  
-  transition(IS_D, Inv)
-  {
-	z_stall;
-  }
-  
-  //case IS_D -> S when action:Data from Dir (ack=0 case)
-  transition(IS_D, Data_from_Dir_No_Acks, S)
-  {
-	u_writeDataToCache;	//write incoming data to cache
-	rx_load_hit;		//load hit due to a cache miss that was serviced
-	w_deallocateTBE;	//remove TBE since we are done
-	n_popResponseQueue;	//finish with request from the Response queue
-  }
-  
-  //case IS_D -> S when action:Data from Dir from Owner
-  transition(IS_D, Data_from_Owner, S)
-  {
-	u_writeDataToCache;	//write incoming data to cache
-	rx_load_hit;		//load hit due to a cache miss that was serviced
-	w_deallocateTBE;	//remove TBE since we are done
-	n_popResponseQueue;	//finish with request from the Response queue
-  }
-  
-  //Begin IM_AD state transitions
-  transition(IM_AD, {Load, Ifetch})
-  {
-	z_stall;
-  }
-  
-  transition(IM_AD, Store)
-  {
-	z_stall;
-  }
-  
-  transition(IM_AD, Replacement)
-  {
-	z_stall;
-  }
-  
-  transition(IM_AD, Fwd_GetS)
-  {
-	z_stall;
-  }
-  
-  transition(IM_AD, Fwd_GetM)
-  {
-	z_stall;
-  }
-  
-  transition(IM_AD, Data_from_Dir_No_Acks, M)
-  {
-  //isNumAcks already set?
-	u_writeDataToCache;	//write incoming data to cache
-	sx_store_hit;		//we got a store hit in response to servicing a cache miss
-	w_deallocateTBE;	//remove TBE since we are done
-	n_popResponseQueue;	//finish with request from the Response queue
-  }
-  
-  //recieve data from dir (ack>0) case
-  transition(IM_AD, Data_from_Dir_Ack_Cnt, IM_A)
-  {
-  //isNumAcks already set?
-	u_writeDataToCache;	//write incoming data to cache
-    q_updateAckCount;
-	n_popResponseQueue;	//finish with request from the Response queue	
-  }
-  
-  transition(IM_AD, Data_from_Owner, M)
-  {
-	u_writeDataToCache;	//write incoming data to cache
-	sx_store_hit;		//we got a store hit in response to servicing a cache miss
-	w_deallocateTBE;	//remove TBE since we are done
-	n_popResponseQueue;	//finish with request from the Response queue
-  }
-
-  transition(IM_AD, Inv_Ack)
-  {
-	q_updateAckCount;	//do ack-- ->hope this is what this means
-	n_popResponseQueue;	//finish with request from the Response queue
-  }
-  
-  transition(IM_AD, Data_from_Dir_Ack_Cnt_Last, M) 
-  {
-	u_writeDataToCache; //write incoming data to cache
-	sx_store_hit;       //we got a store hit in response to servicing a cache miss
-	q_updateAckCount;   //update ack count
-	w_deallocateTBE;    //remove TBE since we are done
-	n_popResponseQueue; //finish with request from the Response queue
-  }
-  
-  
-  //Begin IM_A transitions
-  transition(IM_A, {Load, Ifetch})
-  {
-	z_stall;
-  }
-
-  transition(IM_A, Store)
-  {
-	z_stall;
-  }
-  
-  transition(IM_A, Replacement)
-  {
-	z_stall;
-  }
-  
-  transition(IM_A, Fwd_GetS)
-  {
-	z_stall;
-  }
-  
-  transition(IM_A, Fwd_GetM)
-  {
-	z_stall;
-  }
-  
-  transition(IM_A, Inv_Ack)
-  {
-	q_updateAckCount;	//do ack-- ->hope this is what this means
-	n_popResponseQueue;	//finish with request from the Response queue;
-  }
-  
-  transition(IM_A, Inv_Ack_all, M)
-  {
-	sx_store_hit;		//we got a store hit in response to servicing a cache miss
-	w_deallocateTBE;	//remove TBE since we are done
-	n_popResponseQueue;	//finish with request from the Response queue
-  }
-  
-  //S transition states
-  transition(S, {Load, Ifetch})
-  {
-	r_load_hit;
-	m_popMandatoryQueue;
-  }
-  
-  transition(S, Store, SM_AD)
-  {
-	//Sent GetM to directory
-	p_profileMiss;			//does not have proper permissions
-	v_allocateTBE;			//going into a transient state so we must allocate a Transient Block Entry
-	am_issueGetM;			//issue a GetM to directory
-    x_copyDataFromCacheToTBE; //copy data to tbe
-	m_popMandatoryQueue;	//finish with request	
-  }
-  
-  transition(S, Replacement, SI_A)
-  {
-	//send PutS to directory
-	bs_issuePUTS;				//issue PUTS to directory
-	v_allocateTBE;				//allocate a TBE because we are moving to transient state
-    h_deallocateL1CacheBlock;	//since we are invalidating/doing cache replacement
-	forward_eviction_to_cpu;	//tell CPU eviction occured
-  }
-  
-  transition(S, Inv, I)
-  {
-	//Send Inv-Ack to Requestor
-	fi_sendInvAck;				//send the invalidate ack
-    h_deallocateL1CacheBlock;   //deallocate the cache block
-	forward_eviction_to_cpu;	//forward the eviction
-	o_popForwardedRequestQueue;	//pop the request from forwarded request queue because this invalidate
-  }
-  
-  //SM_AD state transitions
-  transition(SM_AD, {Load, Ifetch})
-  {
-	r_load_hit;
-	m_popMandatoryQueue;
-  }
-  
-  transition(SM_AD, Store)
-  {
-	z_stall;
-  }
-  
-  transition(SM_AD, Replacement)
-  {
-	z_stall;
-  }
-  
-  transition(SM_AD, Fwd_GetS)
-  {
-	z_stall;
-  }
-  
-  transition(SM_AD, Fwd_GetM)
-  {
-	z_stall;
-  }
-
-  transition(SM_AD, Inv, IM_AD)
-  {
-	//Send Inv-ack to Requestor
-    fi_sendInvAck;				//send the invalidate ack
-	forward_eviction_to_cpu;	//forward the eviction
-	o_popForwardedRequestQueue;	//pop the request from forwarded request queue because this invalidate
-  }
-  
-  //data from dir (ack=0) case
-  transition(SM_AD, Data_from_Dir_No_Acks, M)
-  {
-	sx_store_hit;				//store hit triggered based on a upgrade miss
-	w_deallocateTBE;			//remove TBE since going to stable state
-	n_popResponseQueue;			//handled request
-  }
-  
-  transition(SM_AD, Data_from_Dir_Ack_Cnt, SM_A)
-  {
-	q_updateAckCount;			
-	n_popResponseQueue;			//pop the response
-  }
-  
-  transition(SM_AD, Data_from_Dir_Ack_Cnt_Last, M) 
-  {
-	sx_store_hit;               //store hit triggered based on a upgrade miss
-	q_updateAckCount;
-	w_deallocateTBE;            //remove TBE since going to stable state
-	n_popResponseQueue;         //handled request
-  }
-  
-  transition(SM_AD, Data_from_Owner, M)
-  {
-	sx_store_hit;				//store hit triggered based on a upgrade miss
-	w_deallocateTBE;			//remove TBE since going to stable state
-	n_popResponseQueue;			//pop the response
-  }
-  
-  transition(SM_AD, Inv_Ack)
-  {
-	q_updateAckCount;	//do ack-- ->hope this is what this means
-	n_popResponseQueue;	//finish with request from the Response queue;
-  }  
-
-  //begin SM_A transition states
-  //load encountered
-  transition(SM_A, {Load, Ifetch})
-  {
-	r_load_hit;
-	m_popMandatoryQueue;
-  }
-
-  //store encountered
-  transition(SM_A, Store)
-  {
-	z_stall;
-  }
-
-  //replacement encountered
-  transition(SM_A, Replacement)
-  {
+  transition({IS, IM, MI, II, MII}, {Load, Ifetch, Store, Replacement}) {
     z_stall;
   }
 
-  //Fwd-GetS encountered
-  transition(SM_A, Fwd_GetS)
-  {
+  transition({IS, IM}, {Fwd_GETX, Inv}) {
     z_stall;
   }
 
-  //Fwd-GetM encountered
-  transition(SM_A, Fwd_GetM)
-  {
-    z_stall;
+  transition(MI, Inv) {
+    o_popForwardedRequestQueue;
   }
 
-  //Inv-Ack encountered (sharer has invalidated block)
-  transition(SM_A, Inv_Ack)
-  {
-    q_updateAckCount;	//do ack-- ->hope this is what this means
-    n_popResponseQueue;	//finish with request from the Response queue;
+  transition(M, Store) {
+    s_store_hit;
+    p_profileHit;
+    m_popMandatoryQueue;
   }
 
-  //Last Inv_ack encountered (all sharers have invalidated their blocks)
-  transition(SM_A, Inv_Ack_all, M)
-  {
-    q_updateAckCount;	//do ack-- ->hope this is what this means
-    sx_store_hit;		//we can now call this is a hit because owner
-    w_deallocateTBE;	//let go of TBE since we are in stable state
-    n_popResponseQueue;	//finish with request from the Response queue;
+  transition(M, {Load, Ifetch}) {
+    r_load_hit;
+    p_profileHit;
+    m_popMandatoryQueue;
   }
-  
-  //M State transitions
-  transition(M, {Load, Ifetch})
-  {
-    //hit
-	r_load_hit;
-	m_popMandatoryQueue;
+
+  transition(I, Inv) {
+    o_popForwardedRequestQueue;
   }
-  
-  transition(M, Store)
-  {
-    //hit
-	s_store_hit;
-	m_popMandatoryQueue;
+
+  transition(I, Store, IM) {
+    v_allocateTBE;
+    i_allocateL1CacheBlock;
+    a_issueRequest;
+    p_profileMiss;
+    m_popMandatoryQueue;
   }
-  
-  transition(M, Replacement, MI_A)
-  {
-    bm_issuePUTM;               //sent PutM to dir
-    v_allocateTBE;              //allocate a TBE because we are moving to transient state
-	x_copyDataFromCacheToTBE;   //copy data from cache to TBE in case another core does a Fwd-GetS while in MI_A
-    h_deallocateL1CacheBlock;   //free cache block
+
+  transition(I, {Load, Ifetch}, IS) {
+    v_allocateTBE;
+    i_allocateL1CacheBlock;
+    a_issueRequest;
+    p_profileMiss;
+    m_popMandatoryQueue;
+  }
+
+  transition(IS, Data, M) {
+    u_writeDataToCache;
+    rx_load_hit;
+    w_deallocateTBE;
+    n_popResponseQueue;
+  }
+
+  transition(IM, Data, M) {
+    u_writeDataToCache;
+    sx_store_hit;
+    w_deallocateTBE;
+    n_popResponseQueue;
+  }
+
+  transition(M, Fwd_GETX, I) {
+    e_sendData;
     forward_eviction_to_cpu;
+    o_popForwardedRequestQueue;
   }
 
-  transition(M, Fwd_GetS, S)
-  {
-    de_sendDataFromCacheToDir;      //send data to directory
-    e_sendDataFromCacheToRequestor; //send data to requester
-    o_popForwardedRequestQueue;     //handle request
-  }  
-  
-  transition(M, Fwd_GetM, I)
-  {
-    e_sendDataFromCacheToRequestor; //send data to requester
-    h_deallocateL1CacheBlock;       //done with cache block and no need for a TBE deallocate
-    forward_eviction_to_cpu;		//forward eviction to CPU
-    o_popForwardedRequestQueue;     //handle request
+  transition(I, Replacement) {
+     h_deallocateL1CacheBlock;
   }
 
-  //MI_A transitions
-  
-  //load encountered
-  transition(MI_A, {Load, Ifetch})
-  {
-    z_stall;
+  transition(M, {Replacement,Inv},  MI) {
+     v_allocateTBE;
+     b_issuePUT;
+     x_copyDataFromCacheToTBE;
+     forward_eviction_to_cpu;
+     h_deallocateL1CacheBlock;
   }
-  
-  //store encountered
-  transition(MI_A, Store)
-  {
-    z_stall;
+
+  transition(MI, Writeback_Ack, I) {
+    w_deallocateTBE;
+    o_popForwardedRequestQueue;
   }
-  
-  //replacement encountered
-  transition(MI_A, Replacement)
-  {
-    z_stall;
+
+  transition(MI, Fwd_GETX, II) {
+    ee_sendDataFromTBE;
+    o_popForwardedRequestQueue;
   }
-  
-  //Fwd-GetS - transient state (use TBE to facilitate request)
-  transition(MI_A, Fwd_GetS, SI_A)
-  {
-    ee_sendDataFromTBEToRequestor; //send data to requester from TBE
-    dee_sendDataFromTBEToDir;      //send data to directory from TBE
-    o_popForwardedRequestQueue;    //handle request
+
+  transition(MI, Writeback_Nack, MII) {
+    o_popForwardedRequestQueue;
   }
-  
-  //Fwd-GetM - transient state (use TBE to facilitate request)
-  transition(MI_A, Fwd_GetM, II_A)
-  {
-    ee_sendDataFromTBEToRequestor; //send data to requester from TBE
-    o_popForwardedRequestQueue;    //handle request
+
+  transition(MII, Fwd_GETX, I) {
+    ee_sendDataFromTBE;
+    w_deallocateTBE;
+    o_popForwardedRequestQueue;
   }
-  
-  //Put_Ack encountered - should be a PutM_Ack (or in this case WB_Ack)
-  transition(MI_A, WB_Ack, I)
-  {
-    w_deallocateTBE;	           //let go of TBE since we are going to stable state
-    //forward_eviction_to_cpu;	   //forward the eviction??? Probably not since we didnt evict a cache block
-    o_popForwardedRequestQueue;    //handle request
+
+  transition(II, Writeback_Nack, I) {
+    w_deallocateTBE;
+    o_popForwardedRequestQueue;
   }
-  
-  //SI_A transitions
-  //load encountered
-  transition(SI_A, {Load, Ifetch})
-  {
-    z_stall;
-  }
-  
-  //store encountered
-  transition(SI_A, Store)
-  {
-    z_stall;
-  }
-  
-  //replacement encountered
-  transition(SI_A, Replacement)
-  {
-    z_stall;
-  }
-  
-  //Invalidate encountered
-  transition(SI_A, Inv, II_A)
-  {
-    fi_sendInvAck;                 //send Inv-Ack to requestor
-    o_popForwardedRequestQueue;    //handle request
-  }
-  
-  //Put_Ack encountered - this is WB_Ack by this code
-  transition(SI_A, WB_Ack, I)
-  {
-    w_deallocateTBE;	           //let go of TBE since we are going to stable state
-    o_popForwardedRequestQueue;    //handle request
-  }
-  
-  //II_A transitions
-  
-  //load
-  transition(II_A, {Load, Ifetch})
-  {
-    z_stall;
-  }
-  
-  //store
-  transition(II_A, Store)
-  {
-    z_stall;
-  }
-  
-  transition(II_A, Replacement)
-  {
-    z_stall;
-  }
-  
-  //Put-Ack (WB_Ack)
-  transition(II_A, WB_Ack, I)
-  {
-    w_deallocateTBE;	           //let go of TBE since we are going to stable state
-    o_popForwardedRequestQueue;    //handle request
-  }
-  
 }

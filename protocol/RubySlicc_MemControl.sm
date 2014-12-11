@@ -62,6 +62,11 @@ structure(MemoryMsg, desc="...", interface="Message") {
   bool ReadX,                   desc="Exclusive";
   int Acks,                     desc="How many acks to expect";
 
+  bool functionalRead(Packet *pkt) {
+    return testAndRead(Addr, DataBlk, pkt);
+  }
 
+  bool functionalWrite(Packet *pkt) {
+    return testAndWrite(Addr, DataBlk, pkt);
+  }
 }
-

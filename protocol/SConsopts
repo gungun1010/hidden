@@ -52,4 +52,4 @@ protocol_dirs.append(Dir('.').abspath)
 protocol_base = Dir('.')
 Export('protocol_base')
 
-#slicc_includes.append('mem/ruby/slicc_interface/RubySlicc_includes.hh')
+slicc_includes.append('mem/ruby/slicc_interface/RubySlicc_includes.hh')
