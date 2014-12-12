@@ -36,18 +36,22 @@
 //
 
 external_type(MessageBuffer, buffer="yes", inport="yes", outport="yes");
+
 external_type(OutPort, primitive="yes");
 external_type(Scalar, primitive="yes");
 
 structure(InPort, external = "yes", primitive="yes") {
   bool isReady();
-  Cycles dequeue();
+  void dequeue();
+  int dequeue_getDelayCycles();
   void recycle();
   bool isEmpty();
 }
 
 external_type(NodeID, default="0", primitive="yes");
 external_type(MachineID);
+
+MessageBuffer getMandatoryQueue(int core_id);
 
 structure (Set, external = "yes", non_obj="yes") {
   void setSize(int);
@@ -96,18 +100,13 @@ structure (NetDest, external = "yes", non_obj="yes") {
 
 structure (Sequencer, external = "yes") {
   void readCallback(Address, DataBlock);
-  void readCallback(Address, DataBlock, bool);
-  void readCallback(Address, DataBlock, bool, MachineType);
-  void readCallback(Address, DataBlock, bool, MachineType,
-                    Cycles, Cycles, Cycles);
-
+  void readCallback(Address, GenericMachineType, DataBlock);
+  void readCallback(Address, GenericMachineType, DataBlock, Time, Time, Time);
   void writeCallback(Address, DataBlock);
-  void writeCallback(Address, DataBlock, bool);
-  void writeCallback(Address, DataBlock, bool, MachineType);
-  void writeCallback(Address, DataBlock, bool, MachineType,
-                     Cycles, Cycles, Cycles);
-
+  void writeCallback(Address, GenericMachineType, DataBlock);
+  void writeCallback(Address, GenericMachineType, DataBlock, Time, Time, Time);
   void checkCoherence(Address);
+  void profileNack(Address, int, int, uint64);
   void evictionCallback(Address);
   void recordRequestType(SequencerRequestType);
   bool checkResourceAvailable(CacheResourceType, Address);
@@ -149,12 +148,17 @@ structure (CacheMemory, external = "yes") {
   void deallocate(Address);
   AbstractCacheEntry lookup(Address);
   bool isTagPresent(Address);
+  void profileMiss(RubyRequest);
   void setMRU(Address);
   void recordRequestType(CacheRequestType);
   bool checkResourceAvailable(CacheResourceType, Address);
 
   Scalar demand_misses;
   Scalar demand_hits;
+
+  void profileGenericRequest(GenericRequestType,
+                             RubyAccessMode,
+                             PrefetchBit);
 }
 
 structure (WireBuffer, inport="yes", outport="yes", external = "yes") {
@@ -174,7 +178,7 @@ structure (DMASequencer, external = "yes") {
 structure (TimerTable, inport="yes", external = "yes") {
   bool isReady();
   Address readyAddress();
-  void set(Address, Cycles);
+  void set(Address, int);
   void unset(Address);
   bool isSet(Address);
 }

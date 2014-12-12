@@ -1,81 +1,88 @@
-/*
- * Copyright (c) 2009-2012 Mark D. Hill and David A. Wood
- * Copyright (c) 2010-2012 Advanced Micro Devices, Inc.
- * All rights reserved.
- *
- * Redistribution and use in source and binary forms, with or without
- * modification, are permitted provided that the following conditions are
- * met: redistributions of source code must retain the above copyright
- * notice, this list of conditions and the following disclaimer;
- * redistributions in binary form must reproduce the above copyright
- * notice, this list of conditions and the following disclaimer in the
- * documentation and/or other materials provided with the distribution;
- * neither the name of the copyright holders nor the names of its
- * contributors may be used to endorse or promote products derived from
- * this software without specific prior written permission.
- *
- * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
- * "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
- * LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR
- * A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT
- * OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL,
- * SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT
- * LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE,
- * DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY
- * THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
- * (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
- * OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
- */
 
 machine(Directory, "Directory protocol") 
 : DirectoryMemory * directory,
   MemoryControl * memBuffer,
-  Cycles directory_latency = 12
+  int directory_latency = 12,
+  bool send_evictions = false 
 {
 
-  MessageBuffer forwardFromDir, network="To", virtual_network="3", ordered="false", vnet_type="forward";
-  MessageBuffer responseFromDir, network="To", virtual_network="4", ordered="false", vnet_type="response";
-  MessageBuffer dmaResponseFromDir, network="To", virtual_network="1", ordered="true", vnet_type="response";
-
+  //=============================================================
+  // From the Network
+  // ================
+  //leonTag Incoming Messages (from the network to the directory)
+  // 	    - requests to the directory (e.g., from the Cache controller of the requester's core)
   MessageBuffer requestToDir, network="From", virtual_network="2", ordered="true", vnet_type="request";
-  MessageBuffer dmaRequestToDir, network="From", virtual_network="0", ordered="true", vnet_type="request";
+  MessageBuffer responseToDir, network="From", virtual_network="4", ordered="true", vnet_type="response";
+  
+  //=============================================================
+  // To the Network
+  // ==============
+  //leonTag Outgoing Messages (from the directory to the network)
+  // 	    - forwarded requests from the directory to remote core (e.g., sharers, owner)
+  //        - replies (from the directory to the requesting node)
+  MessageBuffer forwardFromDir, network="To", virtual_network="3", ordered="true", vnet_type="forward";
+  MessageBuffer responseFromDir, network="To", virtual_network="4", ordered="true", vnet_type="response";
 
+  //=============================================================
   // STATES
+  // ======
+  //
+  // leonTag AccessPermissions specified in RubySlicc_Exports.sm
+  // leonTag Valid Data:   Read_Only, Read_Write
+  // leonTag Invalid Data: Invalid, NotPresent, Busy
+  //=============================================================
+
   state_declaration(State, desc="Directory states", default="Directory_State_I") {
-    // Base states
-    I, AccessPermission:Read_Write, desc="Invalid";
-    M, AccessPermission:Invalid, desc="Modified";
 
-    M_DRD, AccessPermission:Busy, desc="Blocked on an invalidation for a DMA read";
-    M_DWR, AccessPermission:Busy, desc="Blocked on an invalidation for a DMA write";
+    //=====================
+    //leonTag Stable States
+    //=====================
 
-    M_DWRI, AccessPermission:Busy, desc="Intermediate state M_DWR-->I"; 
-    M_DRDI, AccessPermission:Busy, desc="Intermediate state M_DRD-->I";
+    I, AccessPermission:Invalid, desc="Not Present/Invalid";
+    M, AccessPermission:Read_Write, desc="Modified";
 
-    IM, AccessPermission:Busy, desc="Intermediate state I-->M";
-    MI, AccessPermission:Busy, desc="Intermediate state M-->I";
-    ID, AccessPermission:Busy, desc="Intermediate state for DMA_READ when in I";
-    ID_W, AccessPermission:Busy, desc="Intermediate state for DMA_WRITE when in I";
+    /* leonTag Complete this section here */
+	S, AccessPermission:Read_Only, desc="Shared";
+
+    //========================
+    //leonTag Transient States
+    //========================
+
+    /* leonTag Complete this section here */
+	S_D, 		AccessPermission:Busy, desc="Transient state: In S waiting for Data";
+	//Need to wait for an ack from memory in order to proceed
+	S_D_S_A, 	AccessPermission:Busy, desc="Transient state: Waiting for Memory Ack to go to S";
+	IM_D, 		AccessPermission:Busy, desc="Transient state: Waiting for Memory data to go to M";
+	IS_D,		AccessPermission:Busy, desc="Transient state: Waiting for Memory data to go to S";
+	//We had to write back data to memory when M state block is invalidated/evicted so we need an ack from memory
+	MI_A,		AccessPermission:Busy, desc="Transient state: Waiting for Memory Ack to go to I";
   }
 
-  // Events
+  // =============================================================================
+  // EVENTS
+  // =============================================================================
   enumeration(Event, desc="Directory events") {
-    // processor requests
-    GETX, desc="A GETX arrives";
-    GETS, desc="A GETS arrives";
-    PUTX, desc="A PUTX arrives";
-    PUTX_NotOwner, desc="A PUTX arrives";
 
-    // DMA requests
-    DMA_READ, desc="A DMA Read memory request";
-    DMA_WRITE, desc="A DMA Write memory request";
+    GETM, desc="A GETM arrives";
+    GETS, desc="A GETS arrives";
+    PUTM, desc="A PUTM arrives";
+    PUTM_Owner, desc="A PUTM arrives from Owner";
+    PUTM_NotOwner, desc="A PUTM arrives";
+
+    PUTS_NotLast, desc="A PUTS_NotLast arrives";
+    PUTS_Last, desc="A PUTS_Last arrives";
+    PUT_Ack, desc="Sending a PUT_Ack message";
 
     // Memory Controller
     Memory_Data, desc="Fetched data from memory arrives";
     Memory_Ack, desc="Writeback Ack from memory arrives";
+
+    Data, desc="Data sent from L1 Cache";
   }
 
-  // TYPES
+  // =============================================================================
+  // STRUCTURE DEFINITIONS
+  // =============================================================================
 
   // DirectoryEntry
   structure(Entry, desc="...", interface="AbstractEntry") {
@@ -101,11 +108,21 @@ machine(Directory, "Directory protocol")
     bool isPresent(Address);
   }
 
-  // ** OBJECTS **
-  TBETable TBEs, template="<Directory_TBE>", constructor="m_number_of_TBEs";
+  // =============================================================================
+  // Objects (or structures)
+  // =============================================================================
+  TBETable TBEs, template_hack="<Directory_TBE>";
+
+  // =============================================================================
+  // PROTOTYPES
+  // =============================================================================
 
   void set_tbe(TBE b);
   void unset_tbe();
+
+  // =============================================================================
+  // FUNCTIONS
+  // =============================================================================
 
   Entry getDirectoryEntry(Address addr), return_by_pointer="yes" {
     Entry dir_entry := static_cast(Entry, "pointer", directory[addr]);
@@ -172,11 +189,6 @@ machine(Directory, "Directory protocol")
   }
 
   DataBlock getDataBlock(Address addr), return_by_ref="yes" {
-    TBE tbe := TBEs[addr];
-    if(is_valid(tbe)) {
-      return tbe.DataBlk;
-    }
-
     return getDirectoryEntry(addr).DataBlk;
   }
 
@@ -184,22 +196,20 @@ machine(Directory, "Directory protocol")
   out_port(forwardNetwork_out, RequestMsg, forwardFromDir);
   out_port(responseNetwork_out, ResponseMsg, responseFromDir);
   out_port(requestQueue_out, ResponseMsg, requestToDir); // For recycling requests
-  out_port(dmaResponseNetwork_out, DMAResponseMsg, dmaResponseFromDir);
 
 //added by SS
   out_port(memQueue_out, MemoryMsg, memBuffer);
   // ** IN_PORTS **
 
-  in_port(dmaRequestQueue_in, DMARequestMsg, dmaRequestToDir) {
-    if (dmaRequestQueue_in.isReady()) {
-      peek(dmaRequestQueue_in, DMARequestMsg) {
-        TBE tbe := TBEs[in_msg.LineAddress];
-        if (in_msg.Type == DMARequestType:READ) {
-          trigger(Event:DMA_READ, in_msg.LineAddress, tbe);
-        } else if (in_msg.Type == DMARequestType:WRITE) {
-          trigger(Event:DMA_WRITE, in_msg.LineAddress, tbe);
+  in_port(responseQueue_in, ResponseMsg, responseToDir) {
+    if (responseQueue_in.isReady()) {
+      peek(responseQueue_in, ResponseMsg) {
+        TBE tbe := TBEs[in_msg.Addr];
+        if (in_msg.Type == CoherenceResponseType:DATA) {
+	  DPRINTF(RubySlicc, "Directory - responseQueue_in port: DATA sent for address %s from machine %s\n", in_msg.Addr, in_msg.Sender);
+          trigger(Event:Data, in_msg.Addr, tbe);
         } else {
-          error("Invalid message");
+          error("Directory: Invalid response message");
         }
       }
     }
@@ -210,15 +220,34 @@ machine(Directory, "Directory protocol")
       peek(requestQueue_in, RequestMsg) {
         TBE tbe := TBEs[in_msg.Addr];
         if (in_msg.Type == CoherenceRequestType:GETS) {
+	  DPRINTF(RubySlicc, "Directory - requestQueue_in port: GETS request for address %s from machine %s\n", in_msg.Addr, in_msg.Requestor);
           trigger(Event:GETS, in_msg.Addr, tbe);
-        } else if (in_msg.Type == CoherenceRequestType:GETX) {
-          trigger(Event:GETX, in_msg.Addr, tbe);
-        } else if (in_msg.Type == CoherenceRequestType:PUTX) {
+        } else if (in_msg.Type == CoherenceRequestType:GETM) {
+	  DPRINTF(RubySlicc, "Directory - requestQueue_in port: GETM request for address %s from machine %s\n", in_msg.Addr, in_msg.Requestor);
+          trigger(Event:GETM, in_msg.Addr, tbe);
+        } else if (in_msg.Type == CoherenceRequestType:PUTM) {
           if (getDirectoryEntry(in_msg.Addr).Owner.isElement(in_msg.Requestor)) {
-            trigger(Event:PUTX, in_msg.Addr, tbe);
+	    DPRINTF(RubySlicc, "Directory - requestQueue_in port: PUTM for address %s from its owner machine %s\n", in_msg.Addr, in_msg.Requestor);
+            trigger(Event:PUTM_Owner, in_msg.Addr, tbe);
           } else {
-            trigger(Event:PUTX_NotOwner, in_msg.Addr, tbe);
+	    DPRINTF(RubySlicc, "Directory - requestQueue_in port: PUTM for address %s from  machine %s (not the owner)\n", in_msg.Addr, in_msg.Requestor);
+            trigger(Event:PUTM_NotOwner, in_msg.Addr, tbe);
           }
+        } else if (in_msg.Type == CoherenceRequestType:PUTS) {
+          if (getDirectoryEntry(in_msg.Addr).Sharers.count() < 2) { //if we have one sharer or none at all (i.e., the block became modified)
+	    DPRINTF(RubySlicc, "Directory - requestQueue_in port: PUTS_LAST for address %s from machine %s\n", in_msg.Addr, in_msg.Requestor);
+            trigger(Event:PUTS_Last, in_msg.Addr, tbe);
+          } else {
+	    DPRINTF(RubySlicc, "Directory - requestQueue_in port: PUTS for address %s from machine %s\n", in_msg.Addr, in_msg.Requestor);
+            trigger(Event:PUTS_NotLast, in_msg.Addr, tbe);
+          }
+          //} else if (getDirectoryEntry(in_msg.Addr).Sharers.count() > 1) {
+	  //  DPRINTF(RubySlicc, "Directory - requestQueue_in port: PUTS for address %s from machine %s\n", in_msg.Addr, in_msg.Requestor);
+          //  trigger(Event:PUTS_NotLast, in_msg.Addr, tbe);
+          //} else {
+	  //  DPRINTF(RubySlicc, "Directory - requestQueue_in port: PUTS for address %s from machine %s - BUT NO sharers\n", in_msg.Addr, in_msg.Requestor);
+          //  error("Directory: Cannot receive a PUTS request if there are no sharers");
+	  //}
         } else {
           error("Invalid message");
         }
@@ -233,8 +262,10 @@ machine(Directory, "Directory protocol")
       peek(memQueue_in, MemoryMsg) {
         TBE tbe := TBEs[in_msg.Addr];
         if (in_msg.Type == MemoryRequestType:MEMORY_READ) {
+	  DPRINTF(RRubySlicc, "Directory - memQueue_in port: MEMORY_READ for address %s from  machine %s\n", in_msg.Addr, in_msg.OriginalRequestorMachId);
           trigger(Event:Memory_Data, in_msg.Addr, tbe);
         } else if (in_msg.Type == MemoryRequestType:MEMORY_WB) {
+	  DPRINTF(RubySlicc, "Directory - memQueue_in port: MEMORY_WB for address %s from  machine %s\n", in_msg.Addr, in_msg.OriginalRequestorMachId);
           trigger(Event:Memory_Ack, in_msg.Addr, tbe);
         } else {
           DPRINTF(RubySlicc,"%s\n", in_msg.Type);
@@ -244,40 +275,61 @@ machine(Directory, "Directory protocol")
     }
   }
 
-  // Actions
+  // =============================================================================
+  // ACTIONS
+  // =============================================================================
 
-  action(a_sendWriteBackAck, "a", desc="Send writeback ack to requestor") {
+ 
+  action(kk_removeRequestSharer, "\k", desc="Remove Request sharer from list") {
     peek(requestQueue_in, RequestMsg) {
-      enqueue(forwardNetwork_out, RequestMsg, directory_latency) {
+      DPRINTF(RubySlicc, "remove request from sharers...");
+      getDirectoryEntry(address).Sharers.remove(in_msg.Requestor);
+    }
+  }
+
+  //leonTag Add Requestor to Sharers List. Just got a memory reply.
+  action(ars1_addRequestorToSharers, "ars1", desc="Add Requestor to sharers list; got reply from memory") {
+    peek(memQueue_in, MemoryMsg) {
+      getDirectoryEntry(address).Sharers.add(in_msg.OriginalRequestorMachId);
+      //out_msg.Destination.add(in_msg.OriginalRequestorMachId);
+    }
+  }
+
+  //leonTag Add Requestor to Sharers List. 
+  action(ars2_addRequestorToSharers, "ars2", desc="Add Requestor to sharers list; got incoming request") {
+    peek(requestQueue_in, RequestMsg) {
+      getDirectoryEntry(address).Sharers.add(in_msg.Requestor);
+    }
+  }
+
+  action(aos_addOwnertoSharers, "aos", desc="Add Owner to sharers list") {
+    peek(requestQueue_in, RequestMsg) {
+      getDirectoryEntry(address).Sharers.addNetDest((getDirectoryEntry(address).Owner));
+    }
+  }
+
+  action(a_sendWriteBackAck, "a", desc="Send writeback ack to requestor; triggered from incoming request") {
+    peek(requestQueue_in, RequestMsg) {
+      enqueue(forwardNetwork_out, RequestMsg, directory_latency) { //Should be forward_network so it's ordered with fwd GETM reqs.
         out_msg.Addr := address;
         out_msg.Type := CoherenceRequestType:WB_ACK;
-        out_msg.Requestor := in_msg.Requestor;
+        out_msg.Requestor := machineID;
         out_msg.Destination.add(in_msg.Requestor);
         out_msg.MessageSize := MessageSizeType:Writeback_Control;
+	DPRINTF(RubySlicc, "Directory - forwardNetwork_out: WB_ACK for address %s  to machine %s\n", out_msg.Addr, in_msg.Requestor);
       }
     }
   }
 
-  action(l_sendWriteBackAck, "la", desc="Send writeback ack to requestor") {
+  action(la_sendWriteBackAck, "la", desc="Send writeback ack to requestor; triggered after memory WB ack") {
     peek(memQueue_in, MemoryMsg) {
-      enqueue(forwardNetwork_out, RequestMsg, 1) {
+      enqueue(forwardNetwork_out, RequestMsg, directory_latency) {
         out_msg.Addr := address;
         out_msg.Type := CoherenceRequestType:WB_ACK;
         out_msg.Requestor := in_msg.OriginalRequestorMachId;
         out_msg.Destination.add(in_msg.OriginalRequestorMachId);
         out_msg.MessageSize := MessageSizeType:Writeback_Control;
-      }
-    }
-  }
-
-  action(b_sendWriteBackNack, "b", desc="Send writeback nack to requestor") {
-    peek(requestQueue_in, RequestMsg) {
-      enqueue(forwardNetwork_out, RequestMsg, directory_latency) {
-        out_msg.Addr := address;
-        out_msg.Type := CoherenceRequestType:WB_NACK;
-        out_msg.Requestor := in_msg.Requestor;
-        out_msg.Destination.add(in_msg.Requestor);
-        out_msg.MessageSize := MessageSizeType:Writeback_Control;
+	DPRINTF(RubySlicc, "Directory - forwardNetwork_out: WB_ACK after Memory Ack for address %s  to machine %s\n", out_msg.Addr, in_msg.OriginalRequestorMachId);
       }
     }
   }
@@ -286,58 +338,57 @@ machine(Directory, "Directory protocol")
     getDirectoryEntry(address).Owner.clear();
   }
 
-  action(d_sendData, "d", desc="Send data to requestor") {
+  action(cs_clearSharers, "cs", desc="Clear the sharers field") {
+    getDirectoryEntry(address).Sharers.clear();
+  }
+
+  action(d_sendData, "d", desc="Send data to requestor after retrieving data block from memory") {
     peek(memQueue_in, MemoryMsg) {
       enqueue(responseNetwork_out, ResponseMsg, 1) {
         out_msg.Addr := address;
-        out_msg.Type := CoherenceResponseType:DATA;
+        out_msg.Type := CoherenceResponseType:DATA_FROM_DIR;
         out_msg.Sender := machineID;
         out_msg.Destination.add(in_msg.OriginalRequestorMachId);
         out_msg.DataBlk := in_msg.DataBlk;
         out_msg.MessageSize := MessageSizeType:Response_Data;
+	out_msg.AckCount := 0;
       }
     }
   }
 
-  action(dr_sendDMAData, "dr", desc="Send Data to DMA controller from directory") {
-    peek(memQueue_in, MemoryMsg) {
-      enqueue(dmaResponseNetwork_out, DMAResponseMsg, 1) {
-        assert(is_valid(tbe));
-        out_msg.PhysicalAddress := address;
-        out_msg.LineAddress := address;
-        out_msg.Type := DMAResponseType:DATA;
-        out_msg.DataBlk := in_msg.DataBlk;   // we send the entire data block and rely on the dma controller to split it up if need be
-        out_msg.Destination.add(tbe.DmaRequestor);
-        out_msg.MessageSize := MessageSizeType:Response_Data;
-      }
-    }
-  }
-
-
-
-  action(drp_sendDMAData, "drp", desc="Send Data to DMA controller from incoming PUTX") {
+  action(ds_sendSharedData, "ds", desc="Send Shared data to requestor with 0 Ack Count") {
     peek(requestQueue_in, RequestMsg) {
-      enqueue(dmaResponseNetwork_out, DMAResponseMsg, 1) {
-        assert(is_valid(tbe));
-        out_msg.PhysicalAddress := address;
-        out_msg.LineAddress := address;
-        out_msg.Type := DMAResponseType:DATA;
-        out_msg.DataBlk := in_msg.DataBlk;   // we send the entire data block and rely on the dma controller to split it up if need be
-        out_msg.Destination.add(tbe.DmaRequestor);
+      enqueue(responseNetwork_out, ResponseMsg, 1) {
+        out_msg.Addr := address;
+        out_msg.Type := CoherenceResponseType:DATA_FROM_DIR;
+        out_msg.Sender := machineID;
+        out_msg.Destination.add(in_msg.Requestor);
+        out_msg.DataBlk := getDirectoryEntry(address).DataBlk;
         out_msg.MessageSize := MessageSizeType:Response_Data;
+	out_msg.AckCount := 0;
+	DPRINTF(RubySlicc, "Directory - responseNetwork_out: sending DATA message type for address %s  to machine %s w/ AckCount %s\n", out_msg.Addr, in_msg.Requestor, out_msg.AckCount);
       }
     }
   }
 
-  action(da_sendDMAAck, "da", desc="Send Ack to DMA controller") {
-      enqueue(dmaResponseNetwork_out, DMAResponseMsg, 1) {
-        assert(is_valid(tbe));
-        out_msg.PhysicalAddress := address;
-        out_msg.LineAddress := address;
-        out_msg.Type := DMAResponseType:ACK;
-        out_msg.Destination.add(tbe.DmaRequestor); 
-        out_msg.MessageSize := MessageSizeType:Writeback_Control;
+  action(ds2_sendSharedData, "ds2", desc="Send Shared data to requestor with Ack Count") {
+    peek(requestQueue_in, RequestMsg) {
+      enqueue(responseNetwork_out, ResponseMsg, 1) {
+        out_msg.Addr := address;
+        out_msg.Type := CoherenceResponseType:DATA_FROM_DIR;
+        out_msg.Sender := machineID;
+        out_msg.Destination.add(in_msg.Requestor);
+        out_msg.DataBlk := getDirectoryEntry(address).DataBlk;
+        out_msg.MessageSize := MessageSizeType:Response_Data;
+	DPRINTF(RubySlicc, "Sending Shared data for address %s; sharers_count %s - sharers list %s - AckCount Bug?!\n", out_msg.Addr, getDirectoryEntry(address).Sharers.count(),
+getDirectoryEntry(address).Sharers);
+        out_msg.AckCount := 0 - getDirectoryEntry(address).Sharers.count();
+        if (getDirectoryEntry(in_msg.Addr).Sharers.isElement(in_msg.Requestor)) {
+           out_msg.AckCount := 1 - getDirectoryEntry(address).Sharers.count();
+        }
+	DPRINTF(RubySlicc, "Directory - responseNetwork_out: sending DATA message type for address %s  to machine %s w/ AckCount %s\n", out_msg.Addr, in_msg.Requestor, out_msg.AckCount);
       }
+    }
   }
 
   action(e_ownerIsRequestor, "e", desc="The owner is now the requestor") {
@@ -359,18 +410,7 @@ machine(Directory, "Directory protocol")
         out_msg.Requestor := in_msg.Requestor;
         out_msg.Destination := getDirectoryEntry(in_msg.Addr).Owner;
         out_msg.MessageSize := MessageSizeType:Writeback_Control;
-      }
-    }
-  }
-
-  action(inv_sendCacheInvalidate, "inv", desc="Invalidate a cache block") {
-    peek(dmaRequestQueue_in, DMARequestMsg) {
-      enqueue(forwardNetwork_out, RequestMsg, directory_latency) {
-        out_msg.Addr := address;
-        out_msg.Type := CoherenceRequestType:INV;
-        out_msg.Requestor := machineID;
-        out_msg.Destination := getDirectoryEntry(in_msg.PhysicalAddress).Owner;
-        out_msg.MessageSize := MessageSizeType:Writeback_Control;
+	DPRINTF(RubySlicc, "Directory - forwardNetwork_out: forwarding message type %s for address %s  from machine %s to machine %s\n", out_msg.Type, out_msg.Addr, in_msg.Requestor, out_msg.Destination);
       }
     }
   }
@@ -379,44 +419,24 @@ machine(Directory, "Directory protocol")
     requestQueue_in.dequeue();
   }
 
-  action(p_popIncomingDMARequestQueue, "p", desc="Pop incoming DMA queue") {
-    dmaRequestQueue_in.dequeue();
+  action(pr_popIncomingResponseQueue, "pr", desc="Pop incoming response queue") {
+    responseQueue_in.dequeue();
   }
 
-  action(l_writeDataToMemory, "pl", desc="Write PUTX data to memory") {
+  /* leonTag Write data to directory */
+  action(pl_writeDataToDirectory, "pl", desc="Write PUTM data to directory") {
     peek(requestQueue_in, RequestMsg) {
-      // assert(in_msg.Dirty);
-      // assert(in_msg.MessageSize == MessageSizeType:Writeback_Data);
       getDirectoryEntry(in_msg.Addr).DataBlk := in_msg.DataBlk;
-      //getDirectoryEntry(in_msg.Addr).DataBlk.copyPartial(in_msg.DataBlk, addressOffset(in_msg.Addr), in_msg.Len);
     }
+  }
+
+  action(pl2_writeDataToDirectory, "pl2", desc="Write data to directory") {
+    peek(responseQueue_in, ResponseMsg) {
+      getDirectoryEntry(in_msg.Addr).DataBlk := in_msg.DataBlk;
+    }  
   }
   
-  action(dwt_writeDMADataFromTBE, "dwt", desc="DMA Write data to memory from TBE") {
-    assert(is_valid(tbe));
-    getDirectoryEntry(address).DataBlk.copyPartial(tbe.DataBlk, addressOffset(tbe.PhysicalAddress), tbe.Len);
-  }
-
-  action(v_allocateTBE, "v", desc="Allocate TBE") {
-    peek(dmaRequestQueue_in, DMARequestMsg) {
-      TBEs.allocate(address);
-      set_tbe(TBEs[address]);
-      tbe.DataBlk := in_msg.DataBlk;
-      tbe.PhysicalAddress := in_msg.PhysicalAddress;
-      tbe.Len := in_msg.Len;
-      tbe.DmaRequestor := in_msg.Requestor;
-    }
-  }
-
-  action(r_allocateTbeForDmaRead, "\r", desc="Allocate TBE for DMA Read") {
-    peek(dmaRequestQueue_in, DMARequestMsg) {
-      TBEs.allocate(address);
-      set_tbe(TBEs[address]);
-      tbe.DmaRequestor := in_msg.Requestor;
-    }
-  }
-
-  action(v_allocateTBEFromRequestNet, "\v", desc="Allocate TBE") {
+  action(vv_allocateTBEFromRequestNet, "\v", desc="Allocate TBE") {
     peek(requestQueue_in, RequestMsg) {
       TBEs.allocate(address);
       set_tbe(TBEs[address]);
@@ -429,14 +449,9 @@ machine(Directory, "Directory protocol")
     unset_tbe();
   }
 
-  action(z_recycleRequestQueue, "z", desc="recycle request queue") {
-    requestQueue_in.recycle();
+  action(z_stall, "z", desc="stall") {
+    // do nothing
   }
-
-  action(y_recycleDMARequestQueue, "y", desc="recycle dma request queue") {
-    dmaRequestQueue_in.recycle();
-  }
-
 
   action(qf_queueMemoryFetchRequest, "qf", desc="Queue off-chip fetch request") {
     peek(requestQueue_in, RequestMsg) {
@@ -447,62 +462,26 @@ machine(Directory, "Directory protocol")
         out_msg.OriginalRequestorMachId := in_msg.Requestor;
         out_msg.MessageSize := in_msg.MessageSize;
         out_msg.DataBlk := getDirectoryEntry(in_msg.Addr).DataBlk;
-        DPRINTF(RubySlicc,"%s\n", out_msg);
+	DPRINTF(RubySlicc, "Directory - memQueue_out: send MEMORY_READ request for address %s triggered from machine %s\n", out_msg.Addr, machineID);
       }
     }
   }
 
-  action(qf_queueMemoryFetchRequestDMA, "qfd", desc="Queue off-chip fetch request") {
-    peek(dmaRequestQueue_in, DMARequestMsg) {
-      enqueue(memQueue_out, MemoryMsg, 1) {
-        out_msg.Addr := address;
-        out_msg.Type := MemoryRequestType:MEMORY_READ;
-        out_msg.Sender := machineID;
-        //out_msg.OriginalRequestorMachId := machineID;
-        out_msg.MessageSize := in_msg.MessageSize;
-        out_msg.DataBlk := getDirectoryEntry(address).DataBlk;
-        DPRINTF(RubySlicc,"%s\n", out_msg);
-      }
-    }
-  }
-
-  action(qw_queueMemoryWBRequest_partial, "qwp", desc="Queue off-chip writeback request") {
-     peek(dmaRequestQueue_in, DMARequestMsg) {
-      enqueue(memQueue_out, MemoryMsg, 1) {
-        out_msg.Addr := address;
-        out_msg.Type := MemoryRequestType:MEMORY_WB;
-        //out_msg.OriginalRequestorMachId := machineID;
-        //out_msg.DataBlk := in_msg.DataBlk;
-        out_msg.DataBlk.copyPartial(in_msg.DataBlk, addressOffset(in_msg.PhysicalAddress), in_msg.Len);
-        out_msg.MessageSize := in_msg.MessageSize;
-        //out_msg.Prefetch := in_msg.Prefetch;
-
-        DPRINTF(RubySlicc,"%s\n", out_msg);
-      }
-    }
-  }
-
-  action(qw_queueMemoryWBRequest_partialTBE, "qwt", desc="Queue off-chip writeback request") {
+  action(qwt_queueMemoryWBRequest_partialTBE, "qwt", desc="Queue off-chip writeback request") {
     peek(requestQueue_in, RequestMsg) {
       enqueue(memQueue_out, MemoryMsg, 1) {
         assert(is_valid(tbe));
         out_msg.Addr := address;
         out_msg.Type := MemoryRequestType:MEMORY_WB;
         out_msg.OriginalRequestorMachId := in_msg.Requestor;
-        // get incoming data
-        // out_msg.DataBlk := in_msg.DataBlk;
         out_msg.DataBlk.copyPartial(tbe.DataBlk, addressOffset(tbe.PhysicalAddress), tbe.Len);
         out_msg.MessageSize := in_msg.MessageSize;
-        //out_msg.Prefetch := in_msg.Prefetch;
-
-        DPRINTF(RubySlicc,"%s\n", out_msg);
+	DPRINTF(RubySlicc, "Directory - memQueue_out: send partial MEMORY_WB request for address %s triggered from machine %s\n", out_msg.Addr, in_msg.Requestor);
       }
     }
   }
 
-
-
-  action(l_queueMemoryWBRequest, "lq", desc="Write PUTX data to memory") {
+  action(lq_queueMemoryWBRequest, "lq", desc="Write PUTM data to memory from requestQueue") {
     peek(requestQueue_in, RequestMsg) {
       enqueue(memQueue_out, MemoryMsg, 1) {
         out_msg.Addr := address;
@@ -511,149 +490,328 @@ machine(Directory, "Directory protocol")
         out_msg.OriginalRequestorMachId := in_msg.Requestor;
         out_msg.DataBlk := in_msg.DataBlk;
         out_msg.MessageSize := in_msg.MessageSize;
-
-        DPRINTF(RubySlicc,"%s\n", out_msg);
+	DPRINTF(RubySlicc, "Directory - memQueue_out: send MEMORY_WB request for address %s triggered from machine %s\n", out_msg.Addr, in_msg.Requestor);
       }
     }
   }
 
-  action(l_popMemQueue, "q", desc="Pop off-chip request queue") {
+  action(lq2_queueMemoryWBRequest, "lqi", desc="Write data to memory from responseQueue") {
+    peek(responseQueue_in, ResponseMsg) {
+      enqueue(memQueue_out, MemoryMsg, 1) {
+        out_msg.Addr := address;
+        out_msg.Type := MemoryRequestType:MEMORY_WB;
+        out_msg.Sender := machineID;
+        out_msg.OriginalRequestorMachId := in_msg.Sender;
+        out_msg.DataBlk := in_msg.DataBlk;
+        out_msg.MessageSize := in_msg.MessageSize;
+	DPRINTF(RubySlicc, "Directory - memQueue_out: send MEMORY_WB request for address %s triggered from machine %s\n", out_msg.Addr, in_msg.Sender);
+      }
+    }
+  }
+
+  action(qm_popMemQueue, "qm", desc="Pop off-chip request queue") {
+    DPRINTF(RubySlicc, "Directory - Popping Request from memQueue\n");
     memQueue_in.dequeue();
   }
 
   action(w_writeDataToMemoryFromTBE, "\w", desc="Write date to directory memory from TBE") {
     assert(is_valid(tbe));
-    getDirectoryEntry(address).DataBlk := TBEs[address].DataBlk;
+    getDirectoryEntry(address).DataBlk.copyPartial(tbe.DataBlk, 
+                                addressOffset(tbe.PhysicalAddress), 
+                                tbe.Len);
+
   }
 
+  action(fwm_sendFwdInvToSharersMinusRequestor, "fwm", desc="invalidate sharers for request") {
+    peek(requestQueue_in, RequestMsg) {
+      enqueue(forwardNetwork_out, RequestMsg, directory_latency) {
+        out_msg.Addr := address;
+        out_msg.Type := CoherenceRequestType:INV;
+        out_msg.Requestor := in_msg.Requestor;
+        out_msg.Destination := getDirectoryEntry(address).Sharers;
+        if (getDirectoryEntry(in_msg.Addr).Sharers.isElement(in_msg.Requestor)) { 
+           out_msg.Destination.remove(in_msg.Requestor); 
+        }
+        out_msg.MessageSize := MessageSizeType:Request_Control;
+	DPRINTF(RubySlicc, "Directory - forwardNetwork_out: send INV request for address %s to Sharers %s triggered from machine %s Destinatation Cnt %s\n", out_msg.Addr, out_msg.Destination, in_msg.Requestor, out_msg.Destination.count());
+      }
+    }
+  }
+
+
+  // =============================================================================
   // TRANSITIONS
+  // =============================================================================
 
-  transition({M_DRD, M_DWR, M_DWRI, M_DRDI}, GETX) {
-    z_recycleRequestQueue;
+  /* leonTag Complete this section here */
+  //received a GetS while in the Invalid state - break this up into 2 parts
+  //part1: ask memory for the data
+  transition(I, GETS, IS_D)
+  {
+	vv_allocateTBEFromRequestNet;		//Allocate a TBE entry since going to transient state
+	qf_queueMemoryFetchRequest;			//Send MEMORY_READ request to memory to obtain the data
+	i_popIncomingRequestQueue;			//Remove request from incoming queue
+  }
+  //part2: get data from memory and complete I->IS_D->S transition
+  transition(IS_D, Memory_Data, S)
+  {
+    ars1_addRequestorToSharers;			//add requestor to sharers. This message was used because action is taken 
+    d_sendData;							//send data from dir. to requestor. This message was used because directory was in invalid state and block had to be retrieved from memory
+	w_writeDataToMemoryFromTBE;			//copy data from TBE to directory entry - notation makes no sense but this is what it is doing upon a memory reply
+    w_deallocateTBE;					//remove TBE as we are going to stable state
+	qm_popMemQueue;						//handled a memory request
+  }
+  
+  //make sure any event that is triggered in IS_D other than Memory_Data is denied
+  transition(IS_D, { Data, 
+                      GETS, 
+                      GETM, 
+                      PUTS_NotLast, 
+                      PUTS_Last, 
+                      PUTM_NotOwner, 
+                      PUTM_Owner 
+                    }) 
+  {
+    z_stall;
+  }
+  
+  transition(IS_D, Memory_Ack) 
+  {
+    qm_popMemQueue;
+  }
+  
+  //received a GetM while in the Invalid state - break this up into 2 parts
+  //part1: ask memory for the data
+  transition(I, GETM, IM_D)
+  {
+	vv_allocateTBEFromRequestNet;		//Allocate a TBE entry since going to transient state
+	e_ownerIsRequestor;                 //ADDED NEW: make requestor owner
+	qf_queueMemoryFetchRequest;			//Send MEMORY_READ request to memory to obtain the data
+	i_popIncomingRequestQueue;			//Remove request from incoming queue
+  }
+  //part2: get data from memory and complete I->IM_D->M transition
+  transition(IM_D, Memory_Data, M)
+  {
+	d_sendData;							//send data from dir. to requestor. This message was used because directory was in invalid state and block had to be retrieved from memory
+    w_deallocateTBE;					//remove TBE as we are going to stable state
+	qm_popMemQueue;						//handled a memory request
+  }
+  
+  //deny all events in IM_D with the exception of memory data
+  transition(IM_D, { Data,
+                      GETS, 
+                      GETM,
+                      PUTS_NotLast, 
+                      PUTS_Last, 
+                      PUTM_NotOwner, 
+                      PUTM_Owner
+                    }) 
+  {
+    z_stall;
+  }
+  
+  transition(IM_D, Memory_Ack) 
+  {
+    qm_popMemQueue;
+  }
+  
+  //received a PutS-NotLast while in the invalid state
+  transition(I, PUTS_NotLast)
+  {
+	//Send a Put-ack to the requestor
+	//do we need to clear sharers?
+	a_sendWriteBackAck;					//WB_ACK in response to a Put message coming from the request Queue
+	i_popIncomingRequestQueue;			//Remove request from incoming queue
   }
 
-  transition({IM, MI, ID, ID_W}, {GETX, GETS, PUTX, PUTX_NotOwner} ) {
-    z_recycleRequestQueue;
+  transition(I, PUTS_Last)
+  {
+	//Send a Put-ack to the requestor
+	//do we need to clear sharers?
+	a_sendWriteBackAck;					//WB_ACK in response to a Put message coming from the request Queue
+	i_popIncomingRequestQueue;			//Remove request from incoming queue
   }
- 
-  transition({IM, MI, ID, ID_W}, {DMA_READ, DMA_WRITE} ) {
-    y_recycleDMARequestQueue;
+  
+  transition(I, PUTM_NotOwner)
+  {
+	//Send a Put-ack to the requestor
+	a_sendWriteBackAck;					//WB_ACK in response to a Put message coming from the request Queue
+	i_popIncomingRequestQueue;			//Remove request from incoming queue
   }
-
-
-  transition(I, GETX, IM) {
-    //d_sendData;
-    qf_queueMemoryFetchRequest;
-    e_ownerIsRequestor;
-    i_popIncomingRequestQueue;
+  
+  transition (I, Memory_Ack) 
+  {
+    qm_popMemQueue;
   }
-
-  transition(IM, Memory_Data, M) {
-    d_sendData;
-    //e_ownerIsRequestor;
-    l_popMemQueue;
+  
+  transition(S, GETS)
+  {
+    ars2_addRequestorToSharers;			//add requestor to sharers, based on message from incoming queue
+	ds_sendSharedData;					//send data from directory for a shared block to a requestor
+	i_popIncomingRequestQueue;			//Remove request from incoming queue
   }
-
-
-  transition(I, DMA_READ, ID) {
-    //dr_sendDMAData;
-    r_allocateTbeForDmaRead;
-    qf_queueMemoryFetchRequestDMA;
-    p_popIncomingDMARequestQueue;
+  
+  transition(S, GETM, M)
+  {
+	//tell the previous owners of this block to invalidate themselves as well as sending data to requestor
+	ds2_sendSharedData;					//send data to requestor (this is a shared block and invalidation acks from remote caches required)
+    fwm_sendFwdInvToSharersMinusRequestor;  //added new: send the invalidates
+	e_ownerIsRequestor;					//requestor is now the owner of this block
+	cs_clearSharers;					//clear all the sharers in this directory block
+	i_popIncomingRequestQueue;			//Remove request from incoming queue
   }
-
-  transition(ID, Memory_Data, I) {
-    dr_sendDMAData;
-    //p_popIncomingDMARequestQueue;
-    w_deallocateTBE;
-    l_popMemQueue;
+  
+  transition(S, PUTS_NotLast)
+  {
+    kk_removeRequestSharer;				//remove requestor from sharers
+	//Send a Put-ack to the requestor
+	a_sendWriteBackAck;					//WB_ACK in response to a Put message coming from the request Queue
+	i_popIncomingRequestQueue;			//Remove request from incoming queue
   }
-
-
-
-  transition(I, DMA_WRITE, ID_W) {
-    v_allocateTBE;
-    qw_queueMemoryWBRequest_partial;
-    p_popIncomingDMARequestQueue;
+  
+  transition(S, PUTS_Last, I)
+  {
+	cs_clearSharers;                    //just clear all sharers
+	a_sendWriteBackAck;					//WB_ACK in response to a Put message coming from the request Queue
+	i_popIncomingRequestQueue;			//Remove request from incoming queue
   }
-
-  transition(ID_W, Memory_Ack, I) {
-    dwt_writeDMADataFromTBE;
-    da_sendDMAAck;
-    w_deallocateTBE;
-    l_popMemQueue;
+  
+  transition(S, PUTM_NotOwner)
+  {
+	kk_removeRequestSharer;				//remove requestor from sharers
+	a_sendWriteBackAck;					//WB_ACK in response to a Put message coming from the request Queue
+	i_popIncomingRequestQueue;			//Remove request from incoming queue
   }
-
-  transition(M, DMA_READ, M_DRD) {
-    v_allocateTBE;
-    inv_sendCacheInvalidate;
-    p_popIncomingDMARequestQueue;
+  
+  transition(S, Memory_Ack) 
+  {
+    qm_popMemQueue;                     //in case we get a mem ack in the S state then handle it
   }
-
-  transition(M_DRD, PUTX, M_DRDI) {     
-    l_writeDataToMemory;
-    drp_sendDMAData;
-    c_clearOwner;
-    l_queueMemoryWBRequest;
-    i_popIncomingRequestQueue;
+  
+  transition(M, GETS, S_D)
+  {
+	vv_allocateTBEFromRequestNet;		//allocate TBE because we are going into transient state
+	f_forwardRequest;					//send fwd gets to owner
+	aos_addOwnertoSharers;				//add owner to sharers
+    ars2_addRequestorToSharers; 		//add requester to sharers based on request queue
+	c_clearOwner;						//clear owner
+	i_popIncomingRequestQueue;			//Remove request from incoming queue
   }
-
-  transition(M_DRDI, Memory_Ack, I) {
-    l_sendWriteBackAck;
-    w_deallocateTBE;   
-    l_popMemQueue;
+  
+  transition(M, GETM)
+  {
+	f_forwardRequest;					//send fwd getm to owner
+    c_clearOwner;                       //just to be careful - clear owner's field
+	e_ownerIsRequestor;					//requestor is now the owner of this block
+	i_popIncomingRequestQueue;			//Remove request from incoming queue
   }
-
-
-  transition(M, DMA_WRITE, M_DWR) {
-    v_allocateTBE;
-    inv_sendCacheInvalidate;
-    p_popIncomingDMARequestQueue;
+  
+  transition(M, PUTS_NotLast)
+  {
+	kk_removeRequestSharer;             //remove requestor from sharer
+	a_sendWriteBackAck;					//WB_ACK in response to a Put message coming from the request Queue
+	i_popIncomingRequestQueue;			//Remove request from incoming queue
   }
-
-  transition(M_DWR, PUTX, M_DWRI) {
-    l_writeDataToMemory;
-    qw_queueMemoryWBRequest_partialTBE;
-    c_clearOwner;
-    i_popIncomingRequestQueue;
+  
+  transition(M, PUTS_Last)
+  {
+	kk_removeRequestSharer;             //remove requestor from sharer ADDED NOW FIXME
+	a_sendWriteBackAck;					//WB_ACK in response to a Put message coming from the request Queue
+	i_popIncomingRequestQueue;			//Remove request from incoming queue
   }
-
-  transition(M_DWRI, Memory_Ack, I) {
-    w_writeDataToMemoryFromTBE;
-    l_sendWriteBackAck;
-    da_sendDMAAck;
-    w_deallocateTBE;
-    l_popMemQueue;
+  
+  transition(M, Memory_Ack) 
+  {
+    qm_popMemQueue;						//pop mem queue 
   }
-
-  transition(M, GETX, M) {
-    f_forwardRequest;
-    e_ownerIsRequestor;
-    i_popIncomingRequestQueue;
+  
+  //break up into part1-part2 because we need to access memory
+  //part1 - do mem stuff
+  transition(M, PUTM_Owner, MI_A)
+  {
+    vv_allocateTBEFromRequestNet;	//allocate TBE entry
+	pl_writeDataToDirectory;		//do I need to to put this updated data to directory - yes i do
+    a_sendWriteBackAck;
+	lq_queueMemoryWBRequest;		//issue a memory writeback
+    c_clearOwner;	
+	i_popIncomingRequestQueue;		//handle incoming request
   }
-
-  transition(M, PUTX, MI) {
-    c_clearOwner;
-    v_allocateTBEFromRequestNet;
-    l_queueMemoryWBRequest;
-    i_popIncomingRequestQueue;
+  //part2 - do actual stuff
+  transition(MI_A, Memory_Ack, I)
+  {
+	//w_writeDataToMemoryFromTBE;		//copy data from TBE to directory entry - this is an ACK so no data
+    w_deallocateTBE;					//remove TBE as we are going to stable state
+	qm_popMemQueue;						//handled a memory request
   }
-
-  transition(MI, Memory_Ack, I) {
-    w_writeDataToMemoryFromTBE;
-    l_sendWriteBackAck;
-    w_deallocateTBE;
-    l_popMemQueue;
+  
+  //deny all events in this transient state other than Memory Ack
+  transition(MI_A, {Data, 
+                  GETS, 
+                  GETM, 
+                  PUTS_Last, 
+                  PUTS_NotLast, 
+                  PUTM_NotOwner, 
+                  PUTM_Owner
+                  })
+  {
+    z_stall;
+  }	
+  
+  transition(M, PUTM_NotOwner)
+  {
+	a_sendWriteBackAck;					//WB_ACK in response to a Put message coming from the request Queue
+	i_popIncomingRequestQueue;			//Remove request from incoming queue
   }
-
-  transition(M, PUTX_NotOwner, M) {
-    b_sendWriteBackNack;
-    i_popIncomingRequestQueue;
+  
+  transition(S_D, GETS)
+  {
+	z_stall;
   }
-
-  transition(I, PUTX_NotOwner, I) {
-    b_sendWriteBackNack;
-    i_popIncomingRequestQueue;
+  
+  transition(S_D, GETM)
+  {
+	z_stall;
   }
-
+  
+  transition(S_D, PUTS_NotLast)
+  {
+	//Send a Put-ack to the requestor
+	kk_removeRequestSharer;				//remove requestor from sharers
+	a_sendWriteBackAck;					//WB_ACK in response to a Put message coming from the request Queue
+	i_popIncomingRequestQueue;			//Remove request from incoming queue
+  }
+  
+  transition(S_D, PUTS_Last)
+  {
+	//Send a Put-ack to the requestor
+	kk_removeRequestSharer;				//remove requestor from sharers
+	a_sendWriteBackAck;					//WB_ACK in response to a Put message coming from the request Queue
+	i_popIncomingRequestQueue;			//Remove request from incoming queue
+  }
+  
+  transition(S_D, PUTM_NotOwner)
+  {
+	//Send a Put-ack to the requestor
+    pl_writeDataToDirectory;         	//write data to dir   
+	kk_removeRequestSharer;				//remove requestor from sharers
+	a_sendWriteBackAck;					//WB_ACK in response to a Put message coming from the request Queue
+	i_popIncomingRequestQueue;			//Remove request from incoming queue
+  }
+  
+  //transient state modelling
+  // S_D -> S_D_S_A -> S
+  //turns out i only need 1 state for this
+  //part1 copy to memory
+  transition(S_D, Data, S)
+  {
+	lq2_queueMemoryWBRequest;	    //do memory writeback request triggered from Response Queue
+    pl2_writeDataToDirectory;		//copy data block to directory entry based on Response Queue
+    w_deallocateTBE;				//remove TBE
+    pr_popIncomingResponseQueue;
+  }
+  
+  transition(S_D, Memory_Ack) 
+  {
+    qm_popMemQueue;
+  }
 }
