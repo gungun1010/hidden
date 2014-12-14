@@ -3,3 +3,4 @@ include "RubySlicc_interfaces.slicc";
 include "MESIF_leon-msg.sm";
 include "MESIF_leon-cache.sm";
 include "MESIF_leon-dir.sm";
+include "MESIF_leon-dma.sm";
