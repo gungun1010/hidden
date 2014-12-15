@@ -51,7 +51,7 @@ enumeration(CoherenceResponseType, desc="...") {
   WRITEBACK_DIRTY,   desc="Dirty writeback (contains data)";
   WRITEBACK,         desc="Generic writeback (contains data)";
   DATA_FROM_DIR,     desc="Data from Directory, along with Ack Count";
-  DATA_FROM_OWNER,	 desc="Data from remote L1 (remote Owner)";
+  DATA_CACHE,	 desc="Data from remote L1 (remote Owner)";
 }
 
 

@@ -52,22 +52,18 @@ machine(L1Cache, "MI Example L1 Cache")
     //transient states 
     //FIXME, figure out what transient states to add
     II, AccessPermission:Busy, desc="Invalid, issued PUT";
-    MI, AccessPermission:Busy, desc="Modified, issued PUT";
     MII, AccessPermission:Busy, desc="Modified, issued PUTX, received nack";
-
-    IS, AccessPermission:Busy, desc="Issued request for LOAD/IFETCH, bus action: GETS; data from: memory";
-    IM, AccessPermission:Busy, desc="Issued request for STORE/ATOMIC";
-    IMI, AccessPermission:Busy, desc="going from I to M, while wating for ack";
-    SM, AccessPermission:Busy, desc="Bus Action: GETX; data from: memory or other processor cache";
-    SMI, AccessPermission:Busy, desc="Bus Action: GETX; data from: memory or other processor cache";
-    SI, AccessPermission:Busy, desc="Bus Action: GETX; data from: memory or other processor cache";
-    MS, AccessPermission:Busy, desc="Bus Action: GETS; data from: other processor's cache";
+    IS, AccessPermission:Busy, desc="Invalid, issued GETS";
+    IM, AccessPermission:Busy, desc="Invalid, issued GETX";
+    IMI, AccessPermission:Busy, desc="Invalid, issued GETX; RWITM (invalidate)";
+    SM, AccessPermission:Busy, desc="Shared, issued GETX";
+    SMI, AccessPermission:Busy, desc="Shared, issued GETX, RWITM";
+    SI, AccessPermission:Busy, desc="Shared, issued INV";
   }
 
   // EVENTS
   enumeration(Event, desc="Cache events") {
     // From processor
-    //FIXME i should not worry about it
     Load,       desc="Load request from processor";
     Ifetch,     desc="Ifetch request from processor";
     Store,      desc="Store request from processor";
@@ -77,13 +73,13 @@ machine(L1Cache, "MI Example L1 Cache")
     Inv_Ack,	 desc="Invalidate Ack";
     Inv_Ack_all, desc="Last Invalidate Ack";
 
-    Data_from_Dir_No_Acks,       desc="Data from Directory, 0 Acks";
-    Data_from_Dir_Ack_Cnt,       desc="Data from Directory, along with Ack Count";
-    Data_from_Dir_Ack_Cnt_Last,  desc="Data from Directory, along with Ack Count, arrive after Inv_Ack";
-    Data_from_Owner,		 desc="Data from remote L1 (remote Owner)";
+    Data,       desc="Data from Directory";
+    Data_Ack,       desc="Data from Directory, along with Ack Count";
+    Data_Ack_Last,  desc="Data from Directory, along with Ack Count, arrive after Inv_Ack";
+    Data_Cache,		 desc="Data from remote L1 (remote Owner)";
 
-    Fwd_GETX,        desc="cache-to-cache transfer";
-    Fwd_GETS,        desc="GETS";
+    Fwd_GETX,        desc="forward from network";
+    Fwd_GETS,        desc="forward from network";
 
     Inv,        desc="Invalidate request from dir";
 
@@ -239,16 +235,16 @@ machine(L1Cache, "MI Example L1 Cache")
 
         if (in_msg.Type == CoherenceResponseType:DATA_FROM_DIR) {
 	        if (in_msg.AckCount == 0) {
-                trigger(Event:Data_from_Dir_No_Acks, in_msg.Addr, cache_entry, tbe);
+                trigger(Event:Data, in_msg.Addr, cache_entry, tbe);
             }else{
                 if ( (getPendingAcks(tbe) - in_msg.AckCount) == 0 ) {
-                    trigger(Event:Data_from_Dir_Ack_Cnt_Last, in_msg.Addr, cache_entry, tbe);
+                    trigger(Event:Data_Ack_Last, in_msg.Addr, cache_entry, tbe);
                 }else{
-                    trigger(Event:Data_from_Dir_Ack_Cnt, in_msg.Addr, cache_entry, tbe);
+                    trigger(Event:Data_Ack, in_msg.Addr, cache_entry, tbe);
                 }
             }
-        }else if (in_msg.Type == CoherenceResponseType:DATA_FROM_OWNER) {
-            trigger(Event:Data_from_Owner, in_msg.Addr, cache_entry, tbe);
+        }else if (in_msg.Type == CoherenceResponseType:DATA_CACHE) {
+            trigger(Event:Data_Cache, in_msg.Addr, cache_entry, tbe);
         }else if (in_msg.Type == CoherenceResponseType:ACK) {
             if ( (getPendingAcks(tbe) - in_msg.AckCount) == 0 ) {
                 trigger(Event:Inv_Ack_all, in_msg.Addr, cache_entry, tbe);
@@ -334,7 +330,7 @@ machine(L1Cache, "MI Example L1 Cache")
       enqueue(responseNetwork_out, ResponseMsg, cache_response_latency) {
         assert(is_valid(cache_entry));
         out_msg.Addr := address;
-        out_msg.Type := CoherenceResponseType:DATA_FROM_OWNER;
+        out_msg.Type := CoherenceResponseType:DATA_CACHE;
         out_msg.Sender := machineID;
         out_msg.Destination.add(in_msg.Requestor);
         out_msg.DataBlk := cache_entry.DataBlk;
@@ -348,7 +344,7 @@ machine(L1Cache, "MI Example L1 Cache")
       enqueue(responseNetwork_out, ResponseMsg, cache_response_latency) {
         assert(is_valid(tbe));
         out_msg.Addr := address;
-        out_msg.Type := CoherenceResponseType:DATA_FROM_OWNER;
+        out_msg.Type := CoherenceResponseType:DATA_CACHE;
         out_msg.Sender := machineID;
         out_msg.Destination.add(in_msg.Requestor);
         out_msg.DataBlk := tbe.DataBlk;
@@ -544,7 +540,7 @@ machine(L1Cache, "MI Example L1 Cache")
   }
 
 
-  transition(IS, Data_from_Dir_No_Acks, S)
+  transition(IS, Data, S)
   {
 	u_writeDataToCache;	//write incoming data to cache
 	rx_load_hit;		//load hit due to a cache miss that was serviced
@@ -552,7 +548,7 @@ machine(L1Cache, "MI Example L1 Cache")
 	n_popResponseQueue;	//finish with request from the Response queue
   }
 
-  transition(IS, Data_from_Owner, S)
+  transition(IS, Data_Cache, S)
   {
 	u_writeDataToCache;	//write incoming data to cache
 	rx_load_hit;		//load hit due to a cache miss that was serviced
@@ -571,7 +567,7 @@ machine(L1Cache, "MI Example L1 Cache")
 	z_stall;
   }
 
-  transition(IM, Data_from_Dir_No_Acks, M)
+  transition(IM, Data, M)
   {
 	u_writeDataToCache;	//write incoming data to cache
 	sx_store_hit;		//we got a store hit in response to servicing a cache miss
@@ -579,14 +575,14 @@ machine(L1Cache, "MI Example L1 Cache")
 	n_popResponseQueue;	//finish with request from the Response queue
   }
 
-  transition(IM, Data_from_Dir_Ack_Cnt, IMI)
+  transition(IM, Data_Ack, IMI)
   {
 	u_writeDataToCache;	//write incoming data to cache
     q_updateAckCount;
 	n_popResponseQueue;	//finish with request from the Response queue	
   }
 
-  transition(IM, Data_from_Owner, M)
+  transition(IM, Data_Cache, M)
   {
 	u_writeDataToCache;	//write incoming data to cache
 	sx_store_hit;		//we got a store hit in response to servicing a cache miss
@@ -600,7 +596,7 @@ machine(L1Cache, "MI Example L1 Cache")
 	n_popResponseQueue;	//finish with request from the Response queue
   }
 
-  transition(IM, Data_from_Dir_Ack_Cnt_Last, M) 
+  transition(IM, Data_Ack_Last, M) 
   {
 	u_writeDataToCache; //write incoming data to cache
 	sx_store_hit;       //we got a store hit in response to servicing a cache miss
@@ -681,20 +677,20 @@ machine(L1Cache, "MI Example L1 Cache")
 	o_popForwardedRequestQueue;	  
   }
     
-  transition(SM, Data_from_Dir_No_Acks, M)
+  transition(SM, Data, M)
   {
 	sx_store_hit;				//store hit triggered based on a upgrade miss
 	w_deallocateTBE;			//remove TBE since going to stable state
 	n_popResponseQueue;			//handled request
   }
 
-  transition(SM, Data_from_Dir_Ack_Cnt, SMI)
+  transition(SM, Data_Ack, SMI)
   {
 	q_updateAckCount;			
 	n_popResponseQueue;			//pop the response
   }
 
-  transition(SM, Data_from_Dir_Ack_Cnt_Last, M) 
+  transition(SM, Data_Ack_Last, M) 
   {
 	sx_store_hit;               //store hit triggered based on a upgrade miss
 	q_updateAckCount;
@@ -702,7 +698,7 @@ machine(L1Cache, "MI Example L1 Cache")
 	n_popResponseQueue;         //handled request
   }
   
-  transition(SM, Data_from_Owner, M)
+  transition(SM, Data_Cache, M)
   {
 	sx_store_hit;				//store hit triggered based on a upgrade miss
 	w_deallocateTBE;			//remove TBE since going to stable state
