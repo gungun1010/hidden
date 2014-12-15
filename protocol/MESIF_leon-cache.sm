@@ -68,18 +68,18 @@ machine(L1Cache, "MI Example L1 Cache")
     Ifetch,     desc="Ifetch request from processor";
     Store,      desc="Store request from processor";
 
-    WB_Ack,     desc="Ack from the directory for a writeback";
+    WB_Ack,     desc="Ack for replacement";
     
-    Inv_Ack,	 desc="Invalidate Ack";
-    Inv_Ack_all, desc="Last Invalidate Ack";
+    Inv_Ack,	 desc="Invalidate Ack for processor";
+    Inv_Ack_all, desc="Last Invalidate Ack for processor";
 
     Data,       desc="Data from Directory";
-    Data_Ack,       desc="Data from Directory, along with Ack Count";
-    Data_Ack_Last,  desc="Data from Directory, along with Ack Count, arrive after Inv_Ack";
-    Data_Cache,		 desc="Data from remote L1 (remote Owner)";
+    Data_Ack,       desc="Data and Ack Count";
+    Data_Ack_Last,  desc="Data and Ack, arrive after Inv_Ack";
+    Data_Cache,		 desc="Data from another cache";
 
-    Fwd_GETX,        desc="forward from network";
-    Fwd_GETS,        desc="forward from network";
+    Fwd_GETX,        desc="GETX from other processor";
+    Fwd_GETS,        desc="GETS from other processor";
 
     Inv,        desc="Invalidate request from dir";
 
@@ -519,41 +519,25 @@ machine(L1Cache, "MI Example L1 Cache")
 	m_popMandatoryQueue;	
   }
 
-  transition(IS, {Load, Ifetch})
+  transition(IS, {Load, Ifetch, Store, Replacement, Inv})
   {
 	z_stall;
   }
-  
-  transition(IS, Store)
-  {
-	z_stall;
-  }
-
-  transition(IS, Replacement)
-  {
-	z_stall;
-  }
-  
-  transition(IS, Inv)
-  {
-	z_stall;
-  }
-
 
   transition(IS, Data, S)
   {
-	u_writeDataToCache;	//write incoming data to cache
-	rx_load_hit;		//load hit due to a cache miss that was serviced
-	w_deallocateTBE;	//remove TBE since we are done
-	n_popResponseQueue;	//finish with request from the Response queue
+	u_writeDataToCache;	
+	rx_load_hit;		
+	w_deallocateTBE;	
+	n_popResponseQueue;	
   }
 
   transition(IS, Data_Cache, S)
   {
-	u_writeDataToCache;	//write incoming data to cache
-	rx_load_hit;		//load hit due to a cache miss that was serviced
-	w_deallocateTBE;	//remove TBE since we are done
-	n_popResponseQueue;	//finish with request from the Response queue
+	u_writeDataToCache;	
+	rx_load_hit;		
+	w_deallocateTBE;	
+	n_popResponseQueue;	
   }
 
   //Begin IM state transitions
@@ -569,31 +553,31 @@ machine(L1Cache, "MI Example L1 Cache")
 
   transition(IM, Data, M)
   {
-	u_writeDataToCache;	//write incoming data to cache
-	sx_store_hit;		//we got a store hit in response to servicing a cache miss
-	w_deallocateTBE;	//remove TBE since we are done
-	n_popResponseQueue;	//finish with request from the Response queue
+	u_writeDataToCache;	
+	sx_store_hit;		
+	w_deallocateTBE;	
+	n_popResponseQueue;
   }
 
   transition(IM, Data_Ack, IMI)
   {
-	u_writeDataToCache;	//write incoming data to cache
+	u_writeDataToCache;	
     q_updateAckCount;
-	n_popResponseQueue;	//finish with request from the Response queue	
+	n_popResponseQueue;		
   }
 
   transition(IM, Data_Cache, M)
   {
-	u_writeDataToCache;	//write incoming data to cache
-	sx_store_hit;		//we got a store hit in response to servicing a cache miss
-	w_deallocateTBE;	//remove TBE since we are done
-	n_popResponseQueue;	//finish with request from the Response queue
+	u_writeDataToCache;	
+	sx_store_hit;		
+	w_deallocateTBE;	
+	n_popResponseQueue;	
   }
 
   transition(IM, Inv_Ack)
   {
-	q_updateAckCount;	//do ack-- ->hope this is what this means
-	n_popResponseQueue;	//finish with request from the Response queue
+	q_updateAckCount;	
+	n_popResponseQueue;	
   }
 
   transition(IM, Data_Ack_Last, M) 
@@ -617,8 +601,8 @@ machine(L1Cache, "MI Example L1 Cache")
 
   transition(IMI, Inv_Ack)
   {
-	q_updateAckCount;	//do ack-- ->hope this is what this means
-	n_popResponseQueue;	//finish with request from the Response queue;
+	q_updateAckCount;	
+	n_popResponseQueue;
   }
 
   transition(IMI, Inv_Ack_all, M)
@@ -702,13 +686,13 @@ machine(L1Cache, "MI Example L1 Cache")
   {
 	sx_store_hit;				//store hit triggered based on a upgrade miss
 	w_deallocateTBE;			//remove TBE since going to stable state
-	n_popResponseQueue;			//pop the response
+	n_popResponseQueue;			
   }
   
   transition(SM, Inv_Ack)
   {
-	q_updateAckCount;	//do ack-- ->hope this is what this means
-	n_popResponseQueue;	//finish with request from the Response queue;
+	q_updateAckCount;	
+	n_popResponseQueue;	
   }  
 
   transition(SMI, {Load, Ifetch})
@@ -724,16 +708,16 @@ machine(L1Cache, "MI Example L1 Cache")
 
   transition(SMI, Inv_Ack)
   {
-    q_updateAckCount;	//do ack-- ->hope this is what this means
-    n_popResponseQueue;	//finish with request from the Response queue;
+    q_updateAckCount;	
+    n_popResponseQueue;	
   }
 
   transition(SMI, Inv_Ack_all, M)
   {
-    q_updateAckCount;	//do ack-- ->hope this is what this means
-    sx_store_hit;		//we can now call this is a hit because owner
-    w_deallocateTBE;	//let go of TBE since we are in stable state
-    n_popResponseQueue;	//finish with request from the Response queue;
+    q_updateAckCount;	
+    sx_store_hit;		
+    w_deallocateTBE;	
+    n_popResponseQueue;	
   }
 
   transition(M, {Load, Ifetch}) {
@@ -761,15 +745,15 @@ machine(L1Cache, "MI Example L1 Cache")
   {
     de_sendDataFromCache;
     e_sendData;
-    o_popForwardedRequestQueue;     //handle request
+    o_popForwardedRequestQueue;     
   }  
 
   transition(M, Fwd_GETX, I)
   {
     e_sendData;
-    h_deallocateL1CacheBlock;       //done with cache block and no need for a TBE deallocate
-    forward_eviction_to_cpu;		//forward eviction to CPU
-    o_popForwardedRequestQueue;     //handle request
+    h_deallocateL1CacheBlock;     
+    forward_eviction_to_cpu;
+    o_popForwardedRequestQueue;     
   }
 
   transition(MII, {Load, Ifetch, Store, Replacement})
